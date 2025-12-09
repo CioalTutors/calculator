@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cioal Tutors Calculator</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        /* Custom scrollbar hiding for the display */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Cursor Animation */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .cursor-blink {
+            display: inline-block;
+            width: 2px;
+            height: 1.2em;
+            background-color: #14532d; /* Dark Green */
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+            margin-left: 1px;
+            margin-right: 1px;
+        }
+        
+        /* Prevent double-tap zoom on mobile */
+        button {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Specialized Button Component themed for Cioal Tutors (Lime Green Edition)
+        const CalculatorButton = ({ 
+          label, 
+          subLabel = null, 
+          color = "bg-[#1a4023]", 
+          textColor = "text-white", 
+          onClick, 
+          className = "", 
+          shape = "rounded-md",
+          textClass = "text-sm",
+          isActive = false 
+        }) => {
+          return (
+            <div className="relative flex flex-col items-center justify-center mb-1">
+              {/* Shift/Alpha label above button */}
+              {subLabel && (
+                <span className={`absolute -top-3 text-[9px] ${subLabel.color || 'text-[#d9f99d]'} font-medium tracking-wider`}>
+                  {subLabel.text}
+                </span>
+              )}
+              <button
+                onClick={onClick}
+                className={`
+                  ${isActive ? 'ring-2 ring-yellow-400' : ''} 
+                  ${color} ${textColor} ${shape} ${className}
+                  shadow-[0_2px_0_rgba(0,0,0,0.3)] 
+                  active:shadow-none active:translate-y-[2px] 
+                  transition-all duration-75
+                  flex items-center justify-center
+                  font-medium z-10 w-full h-full
+                  border-t border-white/10
+                `}
+              >
+                <span className={textClass}>{label}</span>
+              </button>
+            </div>
+          );
+        };
+
+        // --- Helper: Fraction/Radical Converter for S<=>D ---
+        const convertToSD = (currentResult) => {
+            // 1. If currently a fraction or radical string, revert to decimal
+            if (isNaN(currentResult) && (currentResult.includes('/') || currentResult.includes('√') || currentResult.includes('π'))) {
+                 // Try to evaluate the symbolic string back to a number
+                 try {
+                    let evalStr = currentResult
+                        .replace(/√(\d+)/g, 'Math.sqrt($1)')
+                        .replace(/π/g, 'Math.PI');
+                    // eslint-disable-next-line no-new-func
+                    const val = new Function('return ' + evalStr)();
+                    // Return formatting to limited precision
+                    return parseFloat(val.toPrecision(10)).toString();
+                 } catch (e) {
+                    return currentResult;
+                 }
+            }
+
+            const val = parseFloat(currentResult);
+            if (isNaN(val)) return currentResult;
+
+            const tolerance = 1.0E-9;
+
+            // 2. Check for PI factors (e.g. 3.14159 -> π, 1.57 -> 1/2π)
+            const piRatio = val / Math.PI;
+            if (Math.abs(piRatio - Math.round(piRatio)) < tolerance) {
+                const n = Math.round(piRatio);
+                if (n === 1) return 'π';
+                if (n === -1) return '-π';
+                return `${n}π`;
+            }
+
+            // 3. Check for Square Roots (e.g. 1.414 -> √2)
+            const sq = val * val;
+            if (Math.abs(Math.round(sq) - sq) < tolerance) {
+                const n = Math.round(sq);
+                // Only return radical if n is not a perfect square (else it would be int already)
+                if (val % 1 !== 0) {
+                     return `√${n}`;
+                }
+            }
+
+            // 4. Check for Simple Fractions
+            // Continued Fraction algorithm to find rational approximation
+            let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
+            let b = val;
+            let safety = 0;
+            
+            // Handle negative values temporarily
+            const isNeg = val < 0;
+            b = Math.abs(b);
+
+            do {
+                let a = Math.floor(b);
+                let aux = h1; h1 = a * h1 + h2; h2 = aux;
+                aux = k1; k1 = a * k1 + k2; k2 = aux;
+                b = 1 / (b - a);
+                safety++;
+            } while (Math.abs(Math.abs(val) - h1 / k1) > Math.abs(val) * tolerance && safety < 20);
+
+            // If we found a good fraction with reasonable denominator
+            if (k1 < 10000 && k1 !== 1) {
+                return `${isNeg ? '-' : ''}${h1}/${k1}`;
+            }
+
+            // No special format found, return original
+            return currentResult;
+        };
+
+
+        function App() {
+          const [expression, setExpression] = useState('');
+          const [cursorPos, setCursorPos] = useState(0); // Position of cursor
+          const [result, setResult] = useState('');
+          const [history, setHistory] = useState([]);
+          
+          // Settings State
+          const [angleMode, setAngleMode] = useState('D'); // D, R, G
+          const [displayFormat, setDisplayFormat] = useState('Norm'); // Norm, Fix, Sci
+          const [calcMode, setCalcMode] = useState('COMP'); // COMP, CMPLX, STAT, etc.
+
+          // UI State
+          const [isShift, setIsShift] = useState(false); 
+          const [activeMenu, setActiveMenu] = useState(null); // null, 'MODE', 'SETUP'
+          
+          const scrollRef = useRef(null);
+          const cursorRef = useRef(null);
+
+          // Auto-scroll the display to keep cursor in view
+          useEffect(() => {
+            if (cursorRef.current && scrollRef.current) {
+               // Simple logic: scroll to ensure cursor is visible
+               // For a perfect implementation, we'd check offsetLeft, but scrollLeft = scrollWidth works for end typing
+               // When moving cursor left, we might need auto-scroll. 
+               // For now, let's keep the "auto-scroll to end on type" logic if cursor is at end
+               if (cursorPos === expression.length) {
+                   scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+               } else {
+                   // Try to scroll cursor into view
+                   cursorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+               }
+            }
+          }, [expression, cursorPos]);
+
+          const insert = (val) => {
+            if (activeMenu) {
+                handleMenuSelection(val);
+                return;
+            }
+
+            // If result is displayed and we type an operator, continue with result
+            if (result && result !== 'Error' && ['+', '-', '*', '/', '^', 'P', 'C'].includes(val)) {
+                const newExp = result + val;
+                setExpression(newExp);
+                setCursorPos(newExp.length);
+                setResult('');
+                return;
+            } 
+            // If result is displayed and we type a number, start fresh
+            else if (result && result !== 'Error') {
+                 setResult('');
+                 setExpression(val);
+                 setCursorPos(val.length);
+                 return;
+            }
+
+            // Standard insertion at Cursor Position
+            const newExp = expression.slice(0, cursorPos) + val + expression.slice(cursorPos);
+            setExpression(newExp);
+            setCursorPos(prev => prev + val.length);
+            if (isShift) setIsShift(false);
+          };
+
+          const clearAll = () => {
+            setExpression('');
+            setCursorPos(0);
+            setResult('');
+            setIsShift(false);
+            setActiveMenu(null);
+          };
+
+          const deleteChar = () => {
+            if (activeMenu) return;
+            if (cursorPos > 0) {
+                const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
+                setExpression(newExp);
+                setCursorPos(prev => prev - 1);
+            }
+          };
+
+          // --- CURSOR NAVIGATION ---
+          const moveCursorLeft = () => {
+              setCursorPos(prev => Math.max(0, prev - 1));
+          };
+          const moveCursorRight = () => {
+              setCursorPos(prev => Math.min(expression.length, prev + 1));
+          };
+
+          // --- S<=>D Handler ---
+          const handleSD = () => {
+              if (!result || result === 'Error') return;
+              const newRes = convertToSD(result);
+              setResult(newRes);
+          };
+
+          // --- MENU LOGIC ---
+
+          const openModeOrSetup = () => {
+            if (isShift) {
+                setActiveMenu('SETUP');
+                setIsShift(false);
+            } else {
+                setActiveMenu('MODE');
+            }
+          };
+
+          const toggleDRG = () => {
+            setAngleMode(prev => {
+                if (prev === 'D') return 'R';
+                if (prev === 'R') return 'G';
+                return 'D';
+            });
+            setIsShift(false);
+          };
+
+          const handleMenuSelection = (key) => {
+            if (!['1','2','3','4','5','6','7','8'].includes(key)) return;
+
+            if (activeMenu === 'MODE') {
+                switch(key) {
+                    case '1': setCalcMode('COMP'); break;
+                    case '2': setCalcMode('CMPLX'); break;
+                    case '3': setCalcMode('STAT'); break;
+                    case '4': setCalcMode('BASE-N'); break;
+                    case '5': setCalcMode('EQN'); break;
+                    case '6': setCalcMode('MATRIX'); break;
+                    case '7': setCalcMode('TABLE'); break;
+                    case '8': setCalcMode('VECTOR'); break;
+                    default: break;
+                }
+            } else if (activeMenu === 'SETUP') {
+                switch(key) {
+                    case '1': /* MthIO */ break;
+                    case '2': /* LineIO */ break;
+                    case '3': setAngleMode('D'); break;
+                    case '4': setAngleMode('R'); break;
+                    case '5': setAngleMode('G'); break;
+                    case '6': setDisplayFormat('Fix'); break;
+                    case '7': setDisplayFormat('Sci'); break;
+                    case '8': setDisplayFormat('Norm'); break;
+                    default: break;
+                }
+            }
+            setActiveMenu(null);
+            setExpression('');
+            setCursorPos(0);
+            setResult('');
+          };
+
+          const handleButtonPress = (normalVal, shiftedVal = null, isDirectAction = false) => {
+            if (activeMenu) {
+                if (typeof normalVal === 'string' && !isNaN(parseInt(normalVal))) {
+                    handleMenuSelection(normalVal);
+                }
+                return;
+            }
+
+            if (isShift && shiftedVal) {
+                if (isDirectAction) {
+                    shiftedVal(); 
+                } else {
+                    insert(shiftedVal);
+                }
+            } else {
+                if (isDirectAction && typeof normalVal === 'function') {
+                    normalVal();
+                } else {
+                    insert(normalVal);
+                }
+            }
+          };
+
+          const evaluate = () => {
+            if (activeMenu) return;
+            
+            try {
+              const mathLib = `
+                function fact(n) {
+                  if (n < 0) return NaN;
+                  if (Math.floor(n) !== n) return NaN; 
+                  if (n === 0 || n === 1) return 1;
+                  let res = 1;
+                  for (let i = 2; i <= n; i++) res *= i;
+                  return res;
+                }
+                function nPr(n, r) {
+                  if (n < 0 || r < 0 || r > n) return NaN;
+                  return fact(n) / fact(n - r);
+                }
+                function nCr(n, r) {
+                  if (n < 0 || r < 0 || r > n) return NaN;
+                  return fact(n) / (fact(r) * fact(n - r));
+                }
+              `;
+
+              let evalString = expression;
+
+              const atom = "((?:\\d+(?:\\.\\d+)?)|(?:\\([^)]+\\)))"; 
+              const pRegex = new RegExp(`${atom}P${atom}`, 'g');
+              const cRegex = new RegExp(`${atom}C${atom}`, 'g');
+
+              let safety = 0;
+              while (pRegex.test(evalString) && safety < 10) {
+                evalString = evalString.replace(pRegex, 'nPr($1, $2)');
+                safety++;
+              }
+              safety = 0;
+              while (cRegex.test(evalString) && safety < 10) {
+                evalString = evalString.replace(cRegex, 'nCr($1, $2)');
+                safety++;
+              }
+
+              evalString = evalString
+                .replace(/×/g, '*')
+                .replace(/÷/g, '/')
+                .replace(/π/g, 'Math.PI')
+                .replace(/e/g, 'Math.E')
+                .replace(/\^/g, '**')
+                .replace(/√\(/g, 'Math.sqrt(')
+                .replace(/√(\d+)/g, 'Math.sqrt($1)') 
+                .replace(/log\(/g, 'Math.log10(')
+                .replace(/ln\(/g, 'Math.log(')
+                .replace(/Ran#/g, 'Math.random()');
+
+              // FIX: Handle Inverse Trig placeholders first to prevent collision with normal trig
+              evalString = evalString.replace(/asin\(/g, 'P_ASIN(');
+              evalString = evalString.replace(/acos\(/g, 'P_ACOS(');
+              evalString = evalString.replace(/atan\(/g, 'P_ATAN(');
+
+              // Handle Normal Trig
+              if (angleMode === 'D') {
+                evalString = evalString.replace(/sin\(/g, 'Math.sin((Math.PI/180)*');
+                evalString = evalString.replace(/cos\(/g, 'Math.cos((Math.PI/180)*');
+                evalString = evalString.replace(/tan\(/g, 'Math.tan((Math.PI/180)*');
+              } else if (angleMode === 'R') {
+                evalString = evalString.replace(/sin\(/g, 'Math.sin(');
+                evalString = evalString.replace(/cos\(/g, 'Math.cos(');
+                evalString = evalString.replace(/tan\(/g, 'Math.tan(');
+              } else if (angleMode === 'G') {
+                evalString = evalString.replace(/sin\(/g, 'Math.sin((Math.PI/200)*');
+                evalString = evalString.replace(/cos\(/g, 'Math.cos((Math.PI/200)*');
+                evalString = evalString.replace(/tan\(/g, 'Math.tan((Math.PI/200)*');
+              }
+
+              // Handle Inverse Trig (Replace placeholders)
+              if (angleMode === 'D') {
+                evalString = evalString.replace(/P_ASIN\(/g, '(180/Math.PI)*Math.asin(');
+                evalString = evalString.replace(/P_ACOS\(/g, '(180/Math.PI)*Math.acos(');
+                evalString = evalString.replace(/P_ATAN\(/g, '(180/Math.PI)*Math.atan(');
+              } else if (angleMode === 'R') {
+                evalString = evalString.replace(/P_ASIN\(/g, 'Math.asin(');
+                evalString = evalString.replace(/P_ACOS\(/g, 'Math.acos(');
+                evalString = evalString.replace(/P_ATAN\(/g, 'Math.atan(');
+              } else if (angleMode === 'G') {
+                evalString = evalString.replace(/P_ASIN\(/g, '(200/Math.PI)*Math.asin(');
+                evalString = evalString.replace(/P_ACOS\(/g, '(200/Math.PI)*Math.acos(');
+                evalString = evalString.replace(/P_ATAN\(/g, '(200/Math.PI)*Math.atan(');
+              }
+
+              const calcFunc = new Function(mathLib + 'return ' + evalString);
+              const res = calcFunc();
+
+              let finalRes = res;
+              if (!isFinite(res) || isNaN(res)) {
+                finalRes = 'Error';
+              } else {
+                if (displayFormat === 'Fix') {
+                    finalRes = res.toFixed(4);
+                } else if (displayFormat === 'Sci') {
+                    finalRes = res.toExponential(4);
+                } else {
+                    finalRes = parseFloat(res.toPrecision(10)).toString();
+                }
+              }
+
+              setResult(finalRes);
+              if (finalRes !== 'Error') {
+                  setHistory(prev => [finalRes, ...prev]);
+              }
+              setIsShift(false); 
+            } catch (err) {
+              setResult('Error');
+            }
+          };
+
+          const insertAns = () => {
+              if (history.length > 0) {
+                  insert(history[0]);
+              }
+          };
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-[#1a4023] via-[#365E32] to-[#7AC143] flex items-center justify-center p-4 font-sans select-none">
+              
+              {/* Calculator Body */}
+              <div className="relative w-[360px] h-[720px] bg-slate-800 rounded-[40px] shadow-[0_30px_60px_rgba(0,0,0,0.6),inset_0_-4px_6px_rgba(0,0,0,0.5)] overflow-hidden border-4 border-[#7AC143] flex flex-col">
+                
+                {/* --- Top Section: Branding & Solar --- */}
+                <div className="px-6 pt-8 pb-2 flex justify-between items-start relative z-10">
+                  <div>
+                    <div className="font-bold text-white text-lg tracking-wide drop-shadow-sm">CIOALTUTORS</div>
+                    <div className="text-[#d9f99d] text-xs italic font-semibold">fx-991ES PLUS</div>
+                    <div className="text-yellow-400 text-[10px] font-bold mt-1 tracking-wider">NATURAL-V.P.A.M.</div>
+                  </div>
+                  <div className="flex flex-col items-end">
+                     {/* Solar Panel */}
+                     <div className="w-16 h-6 bg-[#1f2e1f] rounded border border-[#568a2e] shadow-inner opacity-90 flex overflow-hidden">
+                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
+                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
+                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
+                     </div>
+                     <div className="text-[8px] text-[#bef264] font-bold mt-1 uppercase">Two Way Power</div>
+                  </div>
+                </div>
+
+                {/* --- Display Container --- */}
+                <div className="mx-6 mb-4 p-4 bg-[#f7fee7] rounded-xl border-2 border-[#7AC143] shadow-[inset_0_2px_8px_rgba(0,0,0,0.1)] h-32 flex flex-col relative font-mono overflow-hidden">
+                    
+                    {/* 1. Status Indicators */}
+                    {!activeMenu && (
+                      <div className="flex justify-between text-[10px] text-[#14532d] font-bold opacity-80 mb-1 border-b border-[#14532d]/10 pb-1">
+                          <div className="flex gap-2">
+                              <span className={isShift ? "text-black bg-yellow-300 px-1 rounded-sm" : "text-transparent px-1"}>S</span>
+                              <span className="text-transparent">A</span>
+                              <span className={angleMode === 'D' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>D</span>
+                              <span className={angleMode === 'R' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>R</span>
+                              <span className={angleMode === 'G' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>G</span>
+                              
+                              <span className={displayFormat === 'Fix' ? "text-black" : "text-transparent"}>FIX</span>
+                              <span className={displayFormat === 'Sci' ? "text-black" : "text-transparent"}>SCI</span>
+                          </div>
+                          <div className="flex gap-2">
+                             {calcMode !== 'COMP' && <span className="text-black bg-black/5 px-1 rounded-sm">{calcMode}</span>}
+                          </div>
+                      </div>
+                    )}
+
+                    {/* 2. Menu Overlay or Normal Display */}
+                    {activeMenu === 'MODE' ? (
+                        <div className="absolute inset-0 bg-[#f7fee7] z-20 p-2 text-[#14532d] text-xs font-bold grid grid-cols-2 gap-x-2 gap-y-1 content-start">
+                            <div>1:COMP</div>
+                            <div>2:CMPLX</div>
+                            <div>3:STAT</div>
+                            <div>4:BASE-N</div>
+                            <div>5:EQN</div>
+                            <div>6:MATRIX</div>
+                            <div>7:TABLE</div>
+                            <div>8:VECTOR</div>
+                        </div>
+                    ) : activeMenu === 'SETUP' ? (
+                        <div className="absolute inset-0 bg-[#f7fee7] z-20 p-2 text-[#14532d] text-xs font-bold grid grid-cols-2 gap-x-2 gap-y-1 content-start">
+                            <div>1:MthIO</div>
+                            <div>2:LineIO</div>
+                            <div>3:Deg</div>
+                            <div>4:Rad</div>
+                            <div>5:Gra</div>
+                            <div>6:Fix</div>
+                            <div>7:Sci</div>
+                            <div>8:Norm</div>
+                        </div>
+                    ) : (
+                        <>
+                            {/* Expression Line with Cursor */}
+                            <div 
+                                ref={scrollRef}
+                                className="text-lg text-[#14532d] overflow-x-auto whitespace-nowrap scrollbar-hide w-full font-semibold tracking-widest h-8 mt-1 flex items-center"
+                            >
+                                <span>{expression.slice(0, cursorPos)}</span>
+                                <span ref={cursorRef} className="cursor-blink"></span>
+                                <span>{expression.slice(cursorPos)}</span>
+                            </div>
+
+                            {/* Result Line */}
+                            <div className="text-right text-3xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto">
+                                {result || (expression ? '' : '0')}
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                {/* --- Controls Section --- */}
+                <div className="flex-1 px-5 pb-8 flex flex-col gap-1 bg-slate-800/50 rounded-b-[36px]">
+                    
+                    {/* Row 1: Shift, Alpha, Replay, Mode, On */}
+                    <div className="grid grid-cols-5 gap-2 mb-2 items-end h-16 relative">
+                         <CalculatorButton 
+                            label="SHIFT" 
+                            color="bg-[#568a2e]" 
+                            isActive={isShift}
+                            textClass="text-[10px] text-white" 
+                            shape="rounded-full w-10 h-6" 
+                            subLabel={{text: "SOLVE", color: "text-yellow-300"}} 
+                            onClick={() => setIsShift(!isShift)}
+                         />
+                         <CalculatorButton label="ALPHA" color="bg-[#568a2e]" textClass="text-[10px] text-yellow-300" shape="rounded-full w-10 h-6" />
+                         
+                         {/* Replay D-Pad (Interactive) */}
+                         <div className="flex items-center justify-center -mt-2">
+                            <div className="w-16 h-16 bg-[#3f6212] rounded-full border border-[#65a30d] shadow-[0_4px_8px_rgba(0,0,0,0.4)] relative flex items-center justify-center overflow-hidden">
+                                <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#4d7c0f] to-[#1a2e05] opacity-80 pointer-events-none"></div>
+                                <span className="text-[8px] text-[#ecfccb] font-bold z-10 mb-1 drop-shadow-sm pointer-events-none">REPLAY</span>
+                                
+                                {/* Invisible Click Zones for Arrows */}
+                                <div onClick={moveCursorLeft} className="absolute left-0 top-0 bottom-0 w-5 bg-transparent z-20 cursor-pointer active:bg-white/10"></div>
+                                <div onClick={moveCursorRight} className="absolute right-0 top-0 bottom-0 w-5 bg-transparent z-20 cursor-pointer active:bg-white/10"></div>
+                                
+                                <div className="absolute top-1 text-[8px] text-[#bef264] pointer-events-none">▲</div>
+                                <div className="absolute bottom-1 text-[8px] text-[#bef264] pointer-events-none">▼</div>
+                                <div className="absolute left-1 text-[8px] text-[#bef264] pointer-events-none">◀</div>
+                                <div className="absolute right-1 text-[8px] text-[#bef264] pointer-events-none">▶</div>
+                            </div>
+                         </div>
+
+                         {/* MODE Button triggers Menu */}
+                         <CalculatorButton 
+                            label="MODE" 
+                            subLabel={{text: "SETUP", color: "text-yellow-300"}} 
+                            color="bg-[#568a2e]" 
+                            textClass="text-[10px] text-white" 
+                            shape="rounded-full w-10 h-6" 
+                            onClick={openModeOrSetup} 
+                         />
+                         
+                         <CalculatorButton label="ON" color="bg-[#568a2e]" textClass="text-[10px] text-white" shape="rounded-full w-10 h-6" onClick={clearAll} />
+                    </div>
+
+                    {/* Scientific Function Grid */}
+                    <div className="grid grid-cols-6 gap-2 mb-2">
+                        <CalculatorButton label="CALC" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                        <CalculatorButton label="∫dx" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('∫(')}/>
+                        <CalculatorButton label="x⁻¹" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('^(-1)')}/>
+                        <CalculatorButton label="log" subLabel={{text: "10^x", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('log(', '10^(')}/>
+                        <CalculatorButton label="ln" subLabel={{text: "e^x", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('ln(', 'e^(')}/>
+                        <CalculatorButton label="x²" subLabel={{text: "√", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('^2', '√(')}/>
+                        
+                        <CalculatorButton label="(-)" subLabel={{text: "A", color: "text-red-400"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('-')}/>
+                        <CalculatorButton label="hyp" subLabel={{text: "B", color: "text-red-400"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                        <CalculatorButton label="sin" subLabel={{text: "sin⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('sin(', 'asin(')}/>
+                        <CalculatorButton label="cos" subLabel={{text: "cos⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('cos(', 'acos(')}/>
+                        <CalculatorButton label="tan" subLabel={{text: "tan⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('tan(', 'atan(')}/>
+                        <CalculatorButton label="xʸ" subLabel={{text: "x√", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('^', '^(1/')}/>
+
+                        <CalculatorButton label="RCL" subLabel={{text: "STO", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                        <CalculatorButton label="ENG" subLabel={{text: "←", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                        <CalculatorButton label="(" subLabel={{text: "%", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('(', '/100')}/>
+                        <CalculatorButton label=")" subLabel={{text: ",", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress(')', ',')}/>
+                        
+                        {/* S<=>D Button */}
+                        <CalculatorButton 
+                            label="S⇔D" 
+                            color="bg-[#1a4023]" 
+                            textClass="text-[10px]" 
+                            shape="rounded-[4px] h-6" 
+                            onClick={handleSD}
+                        />
+                        
+                        <CalculatorButton label="M+" subLabel={{text: "M-", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                    </div>
+
+                    {/* Number Pad Area */}
+                    <div className="grid grid-cols-5 gap-3 mt-2 h-full">
+                        <CalculatorButton label="7" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('7')}/>
+                        <CalculatorButton label="8" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('8')}/>
+                        <CalculatorButton label="9" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('9')}/>
+                        <CalculatorButton label="DEL" subLabel={{text: "INS", color: "text-yellow-300"}} color="bg-[#eab308]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-sm font-bold" onClick={deleteChar}/>
+                        <CalculatorButton label="AC" subLabel={{text: "OFF", color: "text-yellow-300"}} color="bg-[#eab308]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-sm font-bold" onClick={() => handleButtonPress(clearAll, clearAll, true)}/>
+
+                        <CalculatorButton label="4" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('4')}/>
+                        <CalculatorButton label="5" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('5')}/>
+                        <CalculatorButton label="6" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('6')}/>
+                        
+                        {/* Multiply / nPr Button */}
+                        <CalculatorButton label="×" subLabel={{text: "nPr", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('×', 'P')}/>
+                        
+                        {/* Divide / nCr Button */}
+                        <CalculatorButton label="÷" subLabel={{text: "nCr", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('÷', 'C')}/>
+
+                        <CalculatorButton label="1" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('1')}/>
+                        <CalculatorButton label="2" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('2')}/>
+                        <CalculatorButton label="3" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('3')}/>
+                        <CalculatorButton label="+" subLabel={{text: "Pol", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => insert('+')}/>
+                        <CalculatorButton label="-" subLabel={{text: "Rec", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => insert('-')}/>
+
+                        <CalculatorButton label="0" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('0')}/>
+                        <CalculatorButton label="." subLabel={{text: "Ran#", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('.', 'Ran#')}/>
+                        <CalculatorButton label="x10ˣ" subLabel={{text: "π", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-xs font-bold" onClick={() => handleButtonPress('×10^', 'π')}/>
+                        
+                        {/* Ans Button with Shift DRG */}
+                        <CalculatorButton 
+                            label="Ans" 
+                            subLabel={{text: "DRG", color: "text-yellow-300"}} 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            shape="rounded-md h-9" 
+                            textClass="text-xs font-bold" 
+                            onClick={() => handleButtonPress(insertAns, toggleDRG, true)}
+                        />
+                        
+                        <CalculatorButton label="=" subLabel={{text: "%", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-xl font-bold" onClick={() => handleButtonPress(evaluate, evaluate, true)}/>
+                    </div>
+                </div>
+                
+                {/* Footer info */}
+                <div className="absolute bottom-2 w-full text-center text-[8px] text-[#bef264] opacity-50">
+                    Powered by React • Cioal Tutors Theme
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
