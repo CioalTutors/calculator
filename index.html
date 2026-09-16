@@ -124,27 +124,104 @@
             { code: "0", name: "cal ➔ J", factor: 4.184 }
         ];
 
+        // Automatic Parenthesis / Bracket closer
+        const autoCloseBrackets = (str) => {
+            if (!str) return str;
+            let openCount = 0;
+            for (let i = 0; i < str.length; i++) {
+                if (str[i] === '(') openCount++;
+                else if (str[i] === ')') openCount = Math.max(0, openCount - 1);
+            }
+            return str + ')'.repeat(openCount);
+        };
+
+        // Convert Decimal to DMS string with full carryover handling
+        const toDMS = (val) => {
+            let num = parseFloat(val);
+            if (isNaN(num)) return val;
+            const sign = num < 0 ? '-' : '';
+            num = parseFloat(Math.abs(num).toFixed(10));
+            let deg = Math.floor(num);
+            let remainderMin = parseFloat(((num - deg) * 60).toFixed(8));
+            let min = Math.floor(remainderMin);
+            let remainderSec = parseFloat(((remainderMin - min) * 60).toFixed(4));
+            let sec = Math.round(remainderSec * 100) / 100;
+
+            if (sec >= 60) {
+                sec = 0;
+                min += 1;
+            }
+            if (min >= 60) {
+                min = 0;
+                deg += 1;
+            }
+            return `${sign}${deg}°${min}'${sec}"`;
+        };
+
+        // Parse DMS tokens in mathematical expressions
+        const parseDMS = (expr, angleMode = 'D') => {
+            let exp = expr;
+
+            // Pattern 1: D°M°S° or D°M'S"
+            const dms3Regex = /(\d+(?:\.\d+)?)°\s*(\d+(?:\.\d+)?)(?:°|')\s*(\d+(?:\.\d+)?)(?:°|"|'')?/g;
+            exp = exp.replace(dms3Regex, (match, d, m, s) => {
+                const deg = parseFloat(d) || 0;
+                const min = parseFloat(m) || 0;
+                const sec = parseFloat(s) || 0;
+                let totalDeg = deg + (min / 60) + (sec / 3600);
+                if (angleMode === 'R') totalDeg = totalDeg * (Math.PI / 180);
+                else if (angleMode === 'G') totalDeg = totalDeg * (200 / 180);
+                return `(${totalDeg})`;
+            });
+
+            // Pattern 2: D°M° or D°M'
+            const dms2Regex = /(\d+(?:\.\d+)?)°\s*(\d+(?:\.\d+)?)(?:°|')/g;
+            exp = exp.replace(dms2Regex, (match, d, m) => {
+                const deg = parseFloat(d) || 0;
+                const min = parseFloat(m) || 0;
+                let totalDeg = deg + (min / 60);
+                if (angleMode === 'R') totalDeg = totalDeg * (Math.PI / 180);
+                else if (angleMode === 'G') totalDeg = totalDeg * (200 / 180);
+                return `(${totalDeg})`;
+            });
+
+            // Pattern 3: Standalone D°
+            const dms1Regex = /(\d+(?:\.\d+)?)°/g;
+            exp = exp.replace(dms1Regex, (match, d) => {
+                let deg = parseFloat(d) || 0;
+                if (angleMode === 'R') deg = deg * (Math.PI / 180);
+                else if (angleMode === 'G') deg = deg * (200 / 180);
+                return `(${deg})`;
+            });
+
+            return exp;
+        };
+
         // Helper: Fraction / Radical / Pi / Mixed Fraction Converter for S<=>D
         const convertToSD = (currentResult, isMixed = false) => {
             if (!currentResult || currentResult === 'Error') return currentResult;
 
-            // 1. If currently a fraction, mixed fraction or radical, revert to decimal
+            // 1. If currently a fraction, mixed fraction, radical or DMS, revert to decimal
             if (typeof currentResult === 'string' && (currentResult.includes('/') || currentResult.includes('√') || currentResult.includes('π') || currentResult.includes('°'))) {
                  try {
-                    // Check for DMS string e.g. 12°30'0"
+                    // Check for DMS string e.g. 12°30'0" or 12°30°
                     if (currentResult.includes('°')) {
                         const parts = currentResult.split(/[°'"]/);
                         const deg = parseFloat(parts[0]) || 0;
                         const min = parseFloat(parts[1]) || 0;
                         const sec = parseFloat(parts[2]) || 0;
-                        return parseFloat((deg + min/60 + sec/3600).toPrecision(10)).toString();
+                        const sign = currentResult.trim().startsWith('-') ? -1 : 1;
+                        const decVal = (Math.abs(deg) + min / 60 + sec / 3600) * sign;
+                        return parseFloat(decVal.toPrecision(10)).toString();
                     }
 
                     // Check for mixed fraction e.g. "1 2/3"
                     if (currentResult.includes(' ') && currentResult.includes('/')) {
-                        const [whole, frac] = currentResult.split(' ');
+                        const isNeg = currentResult.trim().startsWith('-');
+                        const clean = isNeg ? currentResult.replace('-', '') : currentResult;
+                        const [whole, frac] = clean.split(' ');
                         const [num, den] = frac.split('/');
-                        const val = parseFloat(whole) + (parseFloat(num) / parseFloat(den));
+                        const val = (parseFloat(whole) + (parseFloat(num) / parseFloat(den))) * (isNeg ? -1 : 1);
                         return parseFloat(val.toPrecision(10)).toString();
                     }
 
@@ -209,17 +286,54 @@
             return currentResult.toString();
         };
 
-        // Convert decimal to DMS (Degrees, Minutes, Seconds)
-        const toDMS = (val) => {
-            const num = parseFloat(val);
-            if (isNaN(num)) return val;
-            const sign = num < 0 ? '-' : '';
-            const abs = Math.abs(num);
-            const deg = Math.floor(abs);
-            const remainderMin = (abs - deg) * 60;
-            const min = Math.floor(remainderMin);
-            const sec = parseFloat(((remainderMin - min) * 60).toFixed(2));
-            return `${sign}${deg}°${min}'${sec}"`;
+        // Render Result cleanly: Stacks fractions with horizontal bar (no slash!)
+        const renderResultDisplay = (res) => {
+            if (!res) return <span>0</span>;
+            if (res === 'Error') return <span className="text-red-700">Error</span>;
+
+            // 1. Mixed Fraction e.g. "1 2/3" or "-2 3/5"
+            if (typeof res === 'string' && res.includes(' ') && res.includes('/')) {
+                const isNeg = res.trim().startsWith('-');
+                const clean = isNeg ? res.replace('-', '') : res;
+                const [whole, frac] = clean.split(' ');
+                if (frac && frac.includes('/')) {
+                    const [num, den] = frac.split('/');
+                    return (
+                        <div className="inline-flex items-center justify-end font-mono leading-none">
+                            {isNeg && <span className="text-2xl font-bold leading-none mr-1">-</span>}
+                            <span className="text-2xl font-bold leading-none mr-1.5">{whole}</span>
+                            <div className="inline-flex flex-col items-center justify-center leading-none">
+                                <span className="text-xs font-bold px-1 leading-none">{num}</span>
+                                <div className="w-full h-[1.5px] bg-[#14532d] my-[2px]"></div>
+                                <span className="text-xs font-bold px-1 leading-none">{den}</span>
+                            </div>
+                        </div>
+                    );
+                }
+            }
+
+            // 2. Simple Fraction e.g. "1/2" or "-3/4" or "π/3" or "√3/2"
+            if (typeof res === 'string' && res.includes('/') && !res.includes('°')) {
+                const isNeg = res.trim().startsWith('-');
+                const clean = isNeg ? res.replace('-', '') : res;
+                const parts = clean.split('/');
+                if (parts.length === 2) {
+                    const [num, den] = parts;
+                    return (
+                        <div className="inline-flex items-center justify-end font-mono leading-none">
+                            {isNeg && <span className="text-2xl font-bold leading-none mr-1">-</span>}
+                            <div className="inline-flex flex-col items-center justify-center leading-none">
+                                <span className="text-sm font-bold px-1 leading-none">{num}</span>
+                                <div className="w-full h-[1.5px] bg-[#14532d] my-[2px]"></div>
+                                <span className="text-sm font-bold px-1 leading-none">{den}</span>
+                            </div>
+                        </div>
+                    );
+                }
+            }
+
+            // 3. Normal string or number (DMS e.g. 12°30'15", decimal 0.5, etc.)
+            return <span>{res}</span>;
         };
 
         function App() {
@@ -385,13 +499,15 @@
               setResult(newRes);
           };
 
-          // Degrees / Minutes / Seconds Conversion
+          // Degrees / Minutes / Seconds Conversion (DMS Key)
           const handleDMS = () => {
               if (isOff) return;
               if (result && result !== 'Error') {
                   if (result.includes('°')) {
+                      // Already DMS: toggle to decimal degrees
                       setResult(convertToSD(result));
                   } else {
+                      // Decimal: convert to DMS
                       setResult(toDMS(result));
                   }
               } else {
@@ -456,6 +572,7 @@
 
               // Substitute varName safely
               parsed = parsed.replace(new RegExp(`\\b${varName}\\b`, 'g'), `(${xVal})`);
+              parsed = autoCloseBrackets(parsed);
               return evaluateMath(parsed, false);
           };
 
@@ -463,7 +580,8 @@
           const evaluateMath = (mathStr, formatResult = true) => {
               if (!mathStr || !mathStr.trim()) return 0;
 
-              let exp = mathStr;
+              // Ensure all opened parentheses are properly closed
+              let exp = autoCloseBrackets(mathStr);
 
               // 1. Substitute variables (except in calculus expressions)
               for (const [vKey, vVal] of Object.entries(variables)) {
@@ -598,7 +716,10 @@
               exp = exp.replace(new RegExp(`${atom}P${atom}`, 'g'), 'nPr($1, $2)');
               exp = exp.replace(new RegExp(`${atom}C${atom}`, 'g'), 'nCr($1, $2)');
 
-              // 8. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
+              // 8. Robust DMS Parsing
+              exp = parseDMS(exp, angleMode);
+
+              // 9. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
               exp = exp
                 .replace(/(\d)(\()/g, '$1*$2')
                 .replace(/(\))(\d)/g, '$1*$2')
@@ -610,7 +731,7 @@
               // If X is still in exp, substitute with variables.X
               exp = exp.replace(/\bX\b/g, `(${variables.X || 0})`);
 
-              // 9. Standard Math Replacements
+              // 10. Standard Math Replacements
               exp = exp
                 .replace(/×/g, '*')
                 .replace(/÷/g, '/')
@@ -622,14 +743,6 @@
                 .replace(/√(\d+)/g, 'Math.sqrt($1)')
                 .replace(/Ran#/g, '(Math.floor(Math.random()*1000)/1000)')
                 .replace(/RanInt#\(/g, 'RanInt(');
-
-              // 10. Degrees / Minutes / Seconds parsing: 12°30'0" -> 12.5
-              exp = exp.replace(/(\d+(?:\.\d+)?)°(?:(\d+(?:\.\d+)?)')?(?:(\d+(?:\.\d+)?)"?)/g, (m, d, min, s) => {
-                  const deg = parseFloat(d) || 0;
-                  const minutes = parseFloat(min) || 0;
-                  const seconds = parseFloat(s) || 0;
-                  return `(${deg + minutes / 60 + seconds / 3600})`;
-              });
 
               // 11. Hyperbolic functions
               exp = exp
@@ -676,6 +789,9 @@
                     .replace(/TR_ATAN\(/g, 'Math.atan(');
               }
 
+              // Final check for balanced parentheses
+              exp = autoCloseBrackets(exp);
+
               // Evaluate safely
               // eslint-disable-next-line no-new-func
               const calcFn = new Function(factLib + 'return ' + exp);
@@ -705,38 +821,53 @@
           const handleEvaluate = () => {
               if (isOff || !expression) return;
 
+              // Auto-close any unclosed brackets (e.g. tan⁻¹(1 -> tan⁻¹(1))
+              const cleanExp = autoCloseBrackets(expression);
+              if (cleanExp !== expression) {
+                  setExpression(cleanExp);
+                  setCursorPos(cleanExp.length);
+              }
+
+              const hasDMS = cleanExp.includes('°');
+
               // Check if Equation solving with '=' is requested
-              if (expression.includes('=')) {
-                  handleSolve();
+              if (cleanExp.includes('=')) {
+                  handleSolve(cleanExp);
                   return;
               }
 
               // Handle multi-statement expressions with ':'
-              if (expression.includes(':')) {
-                  const statements = expression.split(':');
+              if (cleanExp.includes(':')) {
+                  const statements = cleanExp.split(':');
                   let lastRes = '';
                   for (const stmt of statements) {
                       if (stmt.trim()) {
                           lastRes = evaluateMath(stmt);
                       }
                   }
+                  if (hasDMS && lastRes !== 'Error' && !isNaN(parseFloat(lastRes))) {
+                      lastRes = toDMS(lastRes);
+                  }
                   setResult(lastRes);
                   if (lastRes !== 'Error') {
                       const num = parseFloat(lastRes);
                       if (!isNaN(num)) setAnsValue(num);
-                      setHistory(prev => [{ expression, result: lastRes }, ...prev]);
+                      setHistory(prev => [{ expression: cleanExp, result: lastRes }, ...prev]);
                       setHistoryIdx(-1);
                   }
                   return;
               }
 
               try {
-                  const finalRes = evaluateMath(expression);
+                  let finalRes = evaluateMath(cleanExp);
+                  if (hasDMS && finalRes !== 'Error' && !isNaN(parseFloat(finalRes))) {
+                      finalRes = toDMS(finalRes);
+                  }
                   setResult(finalRes);
                   if (finalRes !== 'Error') {
                       const num = parseFloat(finalRes);
                       if (!isNaN(num)) setAnsValue(num);
-                      setHistory(prev => [{ expression, result: finalRes }, ...prev]);
+                      setHistory(prev => [{ expression: cleanExp, result: finalRes }, ...prev]);
                       setHistoryIdx(-1);
                   }
               } catch (e) {
@@ -747,10 +878,11 @@
           };
 
           // Numerical Equation Solver (SOLVE)
-          const handleSolve = () => {
+          const handleSolve = (exprToSolve) => {
               if (isOff) return;
               try {
-                  const parts = expression.split('=');
+                  const targetExp = autoCloseBrackets(exprToSolve || expression);
+                  const parts = targetExp.split('=');
                   const leftExp = parts[0];
                   const rightExp = parts[1] || '0';
 
@@ -1032,9 +1164,9 @@
                                     <span>{expression.slice(cursorPos)}</span>
                                 </div>
 
-                                {/* Result Line */}
-                                <div className="text-right text-2xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto">
-                                    {result || (expression ? '' : '0')}
+                                {/* Result Line with Proper Stacked Fraction Rendering (No Slash) */}
+                                <div className="text-right text-2xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto flex items-center justify-end">
+                                    {renderResultDisplay(result || (expression ? '' : '0'))}
                                 </div>
                             </>
                         )}
