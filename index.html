@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cioal Tutors Calculator</title>
+    <title>Cioal Tutors Scientific Calculator (fx-991ES PLUS)</title>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -16,7 +16,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
-        /* Custom scrollbar hiding for the display */
         .scrollbar-hide::-webkit-scrollbar {
             display: none;
         }
@@ -25,7 +24,6 @@
             scrollbar-width: none;
         }
         
-        /* Cursor Animation */
         @keyframes blink {
             0%, 100% { opacity: 1; }
             50% { opacity: 0; }
@@ -33,17 +31,17 @@
         .cursor-blink {
             display: inline-block;
             width: 2px;
-            height: 1.2em;
-            background-color: #14532d; /* Dark Green */
+            height: 1.15em;
+            background-color: #14532d;
             vertical-align: text-bottom;
             animation: blink 1s step-end infinite;
             margin-left: 1px;
             margin-right: 1px;
         }
         
-        /* Prevent double-tap zoom on mobile */
         button {
             touch-action: manipulation;
+            user-select: none;
         }
     </style>
 </head>
@@ -53,37 +51,43 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Specialized Button Component themed for Cioal Tutors (Lime Green Edition)
+        // Specialized Button Component with dual SHIFT (gold) and ALPHA (red) labels
         const CalculatorButton = ({ 
           label, 
-          subLabel = null, 
+          subShift = null,
+          subAlpha = null,
           color = "bg-[#1a4023]", 
           textColor = "text-white", 
           onClick, 
           className = "", 
           shape = "rounded-md",
-          textClass = "text-sm",
-          isActive = false 
+          textClass = "text-xs font-semibold",
+          isActive = false,
+          disabled = false
         }) => {
           return (
-            <div className="relative flex flex-col items-center justify-center mb-1">
-              {/* Shift/Alpha label above button */}
-              {subLabel && (
-                <span className={`absolute -top-3 text-[9px] ${subLabel.color || 'text-[#d9f99d]'} font-medium tracking-wider`}>
-                  {subLabel.text}
-                </span>
-              )}
+            <div className="relative flex flex-col items-center justify-end w-full h-[46px]">
+              {/* Dual Sub-labels: SHIFT (gold on left) & ALPHA (red on right) */}
+              <div className="w-full flex justify-between px-0.5 text-[8px] font-bold leading-none mb-1 h-3 items-end pointer-events-none">
+                <span className="text-yellow-300 truncate tracking-tight">{subShift || ""}</span>
+                <span className="text-red-400 truncate tracking-tight">{subAlpha || ""}</span>
+              </div>
+              
               <button
+                type="button"
+                disabled={disabled}
                 onClick={onClick}
                 className={`
-                  ${isActive ? 'ring-2 ring-yellow-400' : ''} 
+                  ${isActive ? 'ring-2 ring-yellow-400 scale-[1.02]' : ''} 
                   ${color} ${textColor} ${shape} ${className}
-                  shadow-[0_2px_0_rgba(0,0,0,0.3)] 
+                  shadow-[0_2px_0_rgba(0,0,0,0.35)] 
                   active:shadow-none active:translate-y-[2px] 
                   transition-all duration-75
                   flex items-center justify-center
-                  font-medium z-10 w-full h-full
-                  border-t border-white/10
+                  w-full h-8
+                  border-t border-white/15
+                  hover:brightness-110
+                  disabled:opacity-40 disabled:pointer-events-none
                 `}
               >
                 <span className={textClass}>{label}</span>
@@ -92,18 +96,63 @@
           );
         };
 
-        // --- Helper: Fraction/Radical Converter for S<=>D ---
-        const convertToSD = (currentResult) => {
-            // 1. If currently a fraction or radical string, revert to decimal
-            if (isNaN(currentResult) && (currentResult.includes('/') || currentResult.includes('√') || currentResult.includes('π'))) {
-                 // Try to evaluate the symbolic string back to a number
+        // Scientific Constants lookup (Casio CONST)
+        const CONSTANTS = [
+            { code: "1", sym: "c", name: "Speed of light", val: 299792458 },
+            { code: "2", sym: "h", name: "Planck constant", val: 6.62607015e-34 },
+            { code: "3", sym: "G", name: "Gravitational const", val: 6.67430e-11 },
+            { code: "4", sym: "g", name: "Standard gravity", val: 9.80665 },
+            { code: "5", sym: "e", name: "Elementary charge", val: 1.602176634e-19 },
+            { code: "6", sym: "me", name: "Electron mass", val: 9.1093837e-31 },
+            { code: "7", sym: "mp", name: "Proton mass", val: 1.6726219e-27 },
+            { code: "8", sym: "Na", name: "Avogadro const", val: 6.02214076e23 },
+            { code: "9", sym: "R", name: "Molar gas const", val: 8.314462618 },
+            { code: "0", sym: "k", name: "Boltzmann const", val: 1.380649e-23 }
+        ];
+
+        // Unit Conversions lookup (Casio CONV)
+        const CONVERSIONS = [
+            { code: "1", name: "km/h ➔ m/s", factor: 1 / 3.6 },
+            { code: "2", name: "m/s ➔ km/h", factor: 3.6 },
+            { code: "3", name: "in ➔ cm", factor: 2.54 },
+            { code: "4", name: "cm ➔ in", factor: 1 / 2.54 },
+            { code: "5", name: "ft ➔ m", factor: 0.3048 },
+            { code: "6", name: "m ➔ ft", factor: 1 / 0.3048 },
+            { code: "7", name: "lb ➔ kg", factor: 0.45359237 },
+            { code: "8", name: "kg ➔ lb", factor: 1 / 0.45359237 },
+            { code: "9", name: "°C ➔ °F", custom: (v) => (v * 9/5) + 32 },
+            { code: "0", name: "cal ➔ J", factor: 4.184 }
+        ];
+
+        // Helper: Fraction / Radical / Pi / Mixed Fraction Converter for S<=>D
+        const convertToSD = (currentResult, isMixed = false) => {
+            if (!currentResult || currentResult === 'Error') return currentResult;
+
+            // 1. If currently a fraction, mixed fraction or radical, revert to decimal
+            if (typeof currentResult === 'string' && (currentResult.includes('/') || currentResult.includes('√') || currentResult.includes('π') || currentResult.includes('°'))) {
                  try {
+                    // Check for DMS string e.g. 12°30'0"
+                    if (currentResult.includes('°')) {
+                        const parts = currentResult.split(/[°'"]/);
+                        const deg = parseFloat(parts[0]) || 0;
+                        const min = parseFloat(parts[1]) || 0;
+                        const sec = parseFloat(parts[2]) || 0;
+                        return parseFloat((deg + min/60 + sec/3600).toPrecision(10)).toString();
+                    }
+
+                    // Check for mixed fraction e.g. "1 2/3"
+                    if (currentResult.includes(' ') && currentResult.includes('/')) {
+                        const [whole, frac] = currentResult.split(' ');
+                        const [num, den] = frac.split('/');
+                        const val = parseFloat(whole) + (parseFloat(num) / parseFloat(den));
+                        return parseFloat(val.toPrecision(10)).toString();
+                    }
+
                     let evalStr = currentResult
                         .replace(/√(\d+)/g, 'Math.sqrt($1)')
                         .replace(/π/g, 'Math.PI');
                     // eslint-disable-next-line no-new-func
                     const val = new Function('return ' + evalStr)();
-                    // Return formatting to limited precision
                     return parseFloat(val.toPrecision(10)).toString();
                  } catch (e) {
                     return currentResult;
@@ -113,36 +162,31 @@
             const val = parseFloat(currentResult);
             if (isNaN(val)) return currentResult;
 
-            const tolerance = 1.0E-9;
+            const tolerance = 1.0e-9;
 
-            // 2. Check for PI factors (e.g. 3.14159 -> π, 1.57 -> 1/2π)
+            // 2. Check for PI factors
             const piRatio = val / Math.PI;
             if (Math.abs(piRatio - Math.round(piRatio)) < tolerance) {
                 const n = Math.round(piRatio);
                 if (n === 1) return 'π';
                 if (n === -1) return '-π';
+                if (n === 0) return '0';
                 return `${n}π`;
             }
 
-            // 3. Check for Square Roots (e.g. 1.414 -> √2)
+            // 3. Check for Square Roots
             const sq = val * val;
-            if (Math.abs(Math.round(sq) - sq) < tolerance) {
+            if (Math.abs(Math.round(sq) - sq) < tolerance && val > 0) {
                 const n = Math.round(sq);
-                // Only return radical if n is not a perfect square (else it would be int already)
                 if (val % 1 !== 0) {
                      return `√${n}`;
                 }
             }
 
-            // 4. Check for Simple Fractions
-            // Continued Fraction algorithm to find rational approximation
+            // 4. Continued Fraction for Rational Approximation
             let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
-            let b = val;
+            let b = Math.abs(val);
             let safety = 0;
-            
-            // Handle negative values temporarily
-            const isNeg = val < 0;
-            b = Math.abs(b);
 
             do {
                 let a = Math.floor(b);
@@ -150,91 +194,135 @@
                 aux = k1; k1 = a * k1 + k2; k2 = aux;
                 b = 1 / (b - a);
                 safety++;
-            } while (Math.abs(Math.abs(val) - h1 / k1) > Math.abs(val) * tolerance && safety < 20);
+            } while (Math.abs(Math.abs(val) - h1 / k1) > Math.abs(val) * tolerance && safety < 25);
 
-            // If we found a good fraction with reasonable denominator
             if (k1 < 10000 && k1 !== 1) {
-                return `${isNeg ? '-' : ''}${h1}/${k1}`;
+                const sign = val < 0 ? '-' : '';
+                if (isMixed && h1 > k1) {
+                    const whole = Math.floor(h1 / k1);
+                    const remainder = h1 % k1;
+                    return remainder === 0 ? `${sign}${whole}` : `${sign}${whole} ${remainder}/${k1}`;
+                }
+                return `${sign}${h1}/${k1}`;
             }
 
-            // No special format found, return original
-            return currentResult;
+            return currentResult.toString();
         };
 
+        // Convert decimal to DMS (Degrees, Minutes, Seconds)
+        const toDMS = (val) => {
+            const num = parseFloat(val);
+            if (isNaN(num)) return val;
+            const sign = num < 0 ? '-' : '';
+            const abs = Math.abs(num);
+            const deg = Math.floor(abs);
+            const remainderMin = (abs - deg) * 60;
+            const min = Math.floor(remainderMin);
+            const sec = parseFloat(((remainderMin - min) * 60).toFixed(2));
+            return `${sign}${deg}°${min}'${sec}"`;
+        };
 
         function App() {
+          const [isOff, setIsOff] = useState(false);
           const [expression, setExpression] = useState('');
-          const [cursorPos, setCursorPos] = useState(0); // Position of cursor
+          const [cursorPos, setCursorPos] = useState(0);
           const [result, setResult] = useState('');
           const [history, setHistory] = useState([]);
+          const [historyIdx, setHistoryIdx] = useState(-1);
           
+          // State Registers for Casio fx-991ES
+          const [variables, setVariables] = useState({
+              A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0
+          });
+          const [ansValue, setAnsValue] = useState(0);
+
           // Settings State
-          const [angleMode, setAngleMode] = useState('D'); // D, R, G
+          const [angleMode, setAngleMode] = useState('D'); // D (Deg), R (Rad), G (Gra)
           const [displayFormat, setDisplayFormat] = useState('Norm'); // Norm, Fix, Sci
           const [calcMode, setCalcMode] = useState('COMP'); // COMP, CMPLX, STAT, etc.
 
-          // UI State
-          const [isShift, setIsShift] = useState(false); 
-          const [activeMenu, setActiveMenu] = useState(null); // null, 'MODE', 'SETUP'
-          
+          // Modifier Modes
+          const [isShift, setIsShift] = useState(false);
+          const [isAlpha, setIsAlpha] = useState(false);
+          const [stoActive, setStoActive] = useState(false);
+          const [rclActive, setRclActive] = useState(false);
+
+          // Active LCD Menu: null, 'MODE', 'SETUP', 'HYP', 'CONST', 'CONV', 'CLR', 'DRG', 'CALC_INPUT'
+          const [activeMenu, setActiveMenu] = useState(null);
+          const [calcVarInput, setCalcVarInput] = useState({ varName: 'X', value: '' });
+
           const scrollRef = useRef(null);
           const cursorRef = useRef(null);
 
-          // Auto-scroll the display to keep cursor in view
+          // Auto-scroll display to cursor position
           useEffect(() => {
             if (cursorRef.current && scrollRef.current) {
-               // Simple logic: scroll to ensure cursor is visible
-               // For a perfect implementation, we'd check offsetLeft, but scrollLeft = scrollWidth works for end typing
-               // When moving cursor left, we might need auto-scroll. 
-               // For now, let's keep the "auto-scroll to end on type" logic if cursor is at end
                if (cursorPos === expression.length) {
                    scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
                } else {
-                   // Try to scroll cursor into view
                    cursorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
                }
             }
           }, [expression, cursorPos]);
 
-          const insert = (val) => {
-            if (activeMenu) {
-                handleMenuSelection(val);
-                return;
+          // Power On / Reset
+          const handlePowerOn = () => {
+            if (isOff) {
+                setIsOff(false);
             }
-
-            // If result is displayed and we type an operator, continue with result
-            if (result && result !== 'Error' && ['+', '-', '*', '/', '^', 'P', 'C'].includes(val)) {
-                const newExp = result + val;
-                setExpression(newExp);
-                setCursorPos(newExp.length);
-                setResult('');
-                return;
-            } 
-            // If result is displayed and we type a number, start fresh
-            else if (result && result !== 'Error') {
-                 setResult('');
-                 setExpression(val);
-                 setCursorPos(val.length);
-                 return;
-            }
-
-            // Standard insertion at Cursor Position
-            const newExp = expression.slice(0, cursorPos) + val + expression.slice(cursorPos);
-            setExpression(newExp);
-            setCursorPos(prev => prev + val.length);
-            if (isShift) setIsShift(false);
-          };
-
-          const clearAll = () => {
             setExpression('');
             setCursorPos(0);
             setResult('');
             setIsShift(false);
+            setIsAlpha(false);
+            setStoActive(false);
+            setRclActive(false);
             setActiveMenu(null);
           };
 
+          // Power Off (SHIFT + AC)
+          const handlePowerOff = () => {
+              setIsOff(true);
+              setIsShift(false);
+              setIsAlpha(false);
+              setStoActive(false);
+              setRclActive(false);
+              setActiveMenu(null);
+          };
+
+          // Character Insertion at Cursor
+          const insert = (val) => {
+            if (isOff) return;
+
+            if (activeMenu) {
+                handleMenuSelect(val);
+                return;
+            }
+
+            // If a result is showing and an operator is entered, chain calculation
+            if (result && result !== 'Error' && ['+', '-', '×', '÷', '^', 'P', 'C'].includes(val)) {
+                const newExp = 'Ans' + val;
+                setExpression(newExp);
+                setCursorPos(newExp.length);
+                setResult('');
+                return;
+            } else if (result && result !== 'Error' && !['+', '-', '×', '÷', '^'].includes(val)) {
+                setResult('');
+                setExpression(val);
+                setCursorPos(val.length);
+                return;
+            }
+
+            const newExp = expression.slice(0, cursorPos) + val + expression.slice(cursorPos);
+            setExpression(newExp);
+            setCursorPos(prev => prev + val.length);
+            
+            setIsShift(false);
+            setIsAlpha(false);
+          };
+
           const deleteChar = () => {
-            if (activeMenu) return;
+            if (isOff || activeMenu) return;
             if (cursorPos > 0) {
                 const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
                 setExpression(newExp);
@@ -242,110 +330,251 @@
             }
           };
 
-          // --- CURSOR NAVIGATION ---
-          const moveCursorLeft = () => {
-              setCursorPos(prev => Math.max(0, prev - 1));
-          };
-          const moveCursorRight = () => {
-              setCursorPos(prev => Math.min(expression.length, prev + 1));
-          };
-
-          // --- S<=>D Handler ---
-          const handleSD = () => {
-              if (!result || result === 'Error') return;
-              const newRes = convertToSD(result);
-              setResult(newRes);
-          };
-
-          // --- MENU LOGIC ---
-
-          const openModeOrSetup = () => {
-            if (isShift) {
-                setActiveMenu('SETUP');
-                setIsShift(false);
-            } else {
-                setActiveMenu('MODE');
-            }
-          };
-
-          const toggleDRG = () => {
-            setAngleMode(prev => {
-                if (prev === 'D') return 'R';
-                if (prev === 'R') return 'G';
-                return 'D';
-            });
-            setIsShift(false);
-          };
-
-          const handleMenuSelection = (key) => {
-            if (!['1','2','3','4','5','6','7','8'].includes(key)) return;
-
-            if (activeMenu === 'MODE') {
-                switch(key) {
-                    case '1': setCalcMode('COMP'); break;
-                    case '2': setCalcMode('CMPLX'); break;
-                    case '3': setCalcMode('STAT'); break;
-                    case '4': setCalcMode('BASE-N'); break;
-                    case '5': setCalcMode('EQN'); break;
-                    case '6': setCalcMode('MATRIX'); break;
-                    case '7': setCalcMode('TABLE'); break;
-                    case '8': setCalcMode('VECTOR'); break;
-                    default: break;
-                }
-            } else if (activeMenu === 'SETUP') {
-                switch(key) {
-                    case '1': /* MthIO */ break;
-                    case '2': /* LineIO */ break;
-                    case '3': setAngleMode('D'); break;
-                    case '4': setAngleMode('R'); break;
-                    case '5': setAngleMode('G'); break;
-                    case '6': setDisplayFormat('Fix'); break;
-                    case '7': setDisplayFormat('Sci'); break;
-                    case '8': setDisplayFormat('Norm'); break;
-                    default: break;
-                }
-            }
-            setActiveMenu(null);
+          const clearAll = () => {
+            if (isOff) return;
             setExpression('');
             setCursorPos(0);
             setResult('');
+            setIsShift(false);
+            setIsAlpha(false);
+            setStoActive(false);
+            setRclActive(false);
+            setActiveMenu(null);
           };
 
-          const handleButtonPress = (normalVal, shiftedVal = null, isDirectAction = false) => {
-            if (activeMenu) {
-                if (typeof normalVal === 'string' && !isNaN(parseInt(normalVal))) {
-                    handleMenuSelection(normalVal);
-                }
-                return;
-            }
-
-            if (isShift && shiftedVal) {
-                if (isDirectAction) {
-                    shiftedVal(); 
-                } else {
-                    insert(shiftedVal);
-                }
-            } else {
-                if (isDirectAction && typeof normalVal === 'function') {
-                    normalVal();
-                } else {
-                    insert(normalVal);
-                }
-            }
+          // Cursor Navigation
+          const moveCursorLeft = () => {
+              if (isOff) return;
+              setCursorPos(prev => Math.max(0, prev - 1));
+          };
+          const moveCursorRight = () => {
+              if (isOff) return;
+              setCursorPos(prev => Math.min(expression.length, prev + 1));
           };
 
-          const evaluate = () => {
-            if (activeMenu) return;
-            
-            try {
-              const mathLib = `
+          // History Navigation (REPLAY Up / Down)
+          const navigateHistoryUp = () => {
+              if (isOff || history.length === 0) return;
+              const nextIdx = historyIdx < history.length - 1 ? historyIdx + 1 : historyIdx;
+              setHistoryIdx(nextIdx);
+              setExpression(history[nextIdx].expression);
+              setCursorPos(history[nextIdx].expression.length);
+              setResult(history[nextIdx].result);
+          };
+
+          const navigateHistoryDown = () => {
+              if (isOff || history.length === 0) return;
+              if (historyIdx > 0) {
+                  const nextIdx = historyIdx - 1;
+                  setHistoryIdx(nextIdx);
+                  setExpression(history[nextIdx].expression);
+                  setCursorPos(history[nextIdx].expression.length);
+                  setResult(history[nextIdx].result);
+              } else if (historyIdx === 0) {
+                  setHistoryIdx(-1);
+                  setExpression('');
+                  setCursorPos(0);
+                  setResult('');
+              }
+          };
+
+          // Standard to Decimal S<=>D
+          const handleSD = (isMixed = false) => {
+              if (isOff || !result || result === 'Error') return;
+              const newRes = convertToSD(result, isMixed);
+              setResult(newRes);
+          };
+
+          // Degrees / Minutes / Seconds Conversion
+          const handleDMS = () => {
+              if (isOff) return;
+              if (result && result !== 'Error') {
+                  if (result.includes('°')) {
+                      setResult(convertToSD(result));
+                  } else {
+                      setResult(toDMS(result));
+                  }
+              } else {
+                  insert('°');
+              }
+          };
+
+          // Engineering Notation (ENG)
+          const handleENG = (isReverse = false) => {
+              if (isOff || !result || result === 'Error') return;
+              const num = parseFloat(result);
+              if (isNaN(num) || num === 0) return;
+
+              let exp = Math.floor(Math.log10(Math.abs(num)));
+              let engExp = Math.floor(exp / 3) * 3;
+              if (isReverse) engExp += 3;
+              const mantissa = num / Math.pow(10, engExp);
+              setResult(`${parseFloat(mantissa.toPrecision(7))}×10^${engExp}`);
+          };
+
+          // Variable Store (STO) & Recall (RCL)
+          const handleVariableKey = (varName) => {
+              if (stoActive) {
+                  const val = result && !isNaN(parseFloat(result)) ? parseFloat(result) : ansValue;
+                  setVariables(prev => ({ ...prev, [varName]: val }));
+                  setResult(`${val} ➔ ${varName}`);
+                  setStoActive(false);
+              } else if (rclActive) {
+                  const val = variables[varName] !== undefined ? variables[varName] : 0;
+                  insert(val.toString());
+                  setRclActive(false);
+              } else if (isAlpha) {
+                  insert(varName);
+                  setIsAlpha(false);
+              }
+          };
+
+          // Memory M+ / M-
+          const handleMemoryAdd = (subtract = false) => {
+              if (isOff) return;
+              try {
+                  const val = result && !isNaN(parseFloat(result)) ? parseFloat(result) : (evaluateMath(expression) || 0);
+                  const multiplier = subtract ? -1 : 1;
+                  const newM = variables.M + (val * multiplier);
+                  setVariables(prev => ({ ...prev, M: newM }));
+                  setResult(`M = ${newM}`);
+                  setIsShift(false);
+              } catch (e) {
+                  setResult('Error');
+              }
+          };
+
+          // Evaluate Single Variable Expression Helper (for calculus & solvers)
+          const evalSingleVar = (expr, varName, xVal) => {
+              let parsed = expr;
+              
+              // Implicit Multiplication for single var
+              parsed = parsed.replace(new RegExp(`(\\d)(${varName})`, 'g'), `$1*${varName}`);
+              parsed = parsed.replace(new RegExp(`(${varName})(\\d)`, 'g'), `${varName}*$1`);
+              parsed = parsed.replace(new RegExp(`(\\))(${varName})`, 'g'), `$1*${varName}`);
+              parsed = parsed.replace(new RegExp(`(${varName})(\\()`, 'g'), `${varName}*$1`);
+
+              // Substitute varName safely
+              parsed = parsed.replace(new RegExp(`\\b${varName}\\b`, 'g'), `(${xVal})`);
+              return evaluateMath(parsed, false);
+          };
+
+          // Core Mathematical Evaluator for Casio fx-991ES
+          const evaluateMath = (mathStr, formatResult = true) => {
+              if (!mathStr || !mathStr.trim()) return 0;
+
+              let exp = mathStr;
+
+              // 1. Substitute variables (except in calculus expressions)
+              for (const [vKey, vVal] of Object.entries(variables)) {
+                  if (vKey !== 'X') {
+                      exp = exp.replace(new RegExp(`\\b${vKey}\\b`, 'g'), `(${vVal})`);
+                  }
+              }
+              exp = exp.replace(/\bAns\b/g, `(${ansValue})`);
+
+              // 2. Numerical Integration: ∫(expr, a, b)
+              const integralRegex = /∫\(([^,]+),([^,]+),([^)]+)\)/;
+              let matchInt = exp.match(integralRegex);
+              let intSafety = 0;
+              while (matchInt && intSafety < 5) {
+                  const subExpr = matchInt[1];
+                  const aVal = evaluateMath(matchInt[2], false);
+                  const bVal = evaluateMath(matchInt[3], false);
+                  
+                  // Adaptive Simpson's Rule (100 sub-intervals)
+                  const n = 100;
+                  const h = (bVal - aVal) / n;
+                  let sum = evalSingleVar(subExpr, 'X', aVal) + evalSingleVar(subExpr, 'X', bVal);
+                  for (let i = 1; i < n; i++) {
+                      const curX = aVal + i * h;
+                      sum += (i % 2 === 0 ? 2 : 4) * evalSingleVar(subExpr, 'X', curX);
+                  }
+                  const intResult = (h / 3) * sum;
+                  exp = exp.replace(matchInt[0], `(${intResult})`);
+                  matchInt = exp.match(integralRegex);
+                  intSafety++;
+              }
+
+              // 3. Numerical Differentiation: d/dx(expr, a)
+              const diffRegex = /d\/dx\(([^,]+),([^)]+)\)/;
+              let matchDiff = exp.match(diffRegex);
+              let diffSafety = 0;
+              while (matchDiff && diffSafety < 5) {
+                  const subExpr = matchDiff[1];
+                  const aVal = evaluateMath(matchDiff[2], false);
+                  const h = 1e-6;
+                  const fPlus = evalSingleVar(subExpr, 'X', aVal + h);
+                  const fMinus = evalSingleVar(subExpr, 'X', aVal - h);
+                  const diffRes = (fPlus - fMinus) / (2 * h);
+                  exp = exp.replace(matchDiff[0], `(${diffRes})`);
+                  matchDiff = exp.match(diffRegex);
+                  diffSafety++;
+              }
+
+              // 4. Summation: Σ(expr, start, end)
+              const sumRegex = /Σ\(([^,]+),([^,]+),([^)]+)\)/;
+              let matchSum = exp.match(sumRegex);
+              let sumSafety = 0;
+              while (matchSum && sumSafety < 5) {
+                  const subExpr = matchSum[1];
+                  const startVal = Math.round(evaluateMath(matchSum[2], false));
+                  const endVal = Math.round(evaluateMath(matchSum[3], false));
+                  let total = 0;
+                  for (let curX = startVal; curX <= endVal; curX++) {
+                      total += evalSingleVar(subExpr, 'X', curX);
+                  }
+                  exp = exp.replace(matchSum[0], `(${total})`);
+                  matchSum = exp.match(sumRegex);
+                  sumSafety++;
+              }
+
+              // 5. Pol(x, y) and Rec(r, θ)
+              const polRegex = /Pol\(([^,]+),([^)]+)\)/;
+              const matchPol = exp.match(polRegex);
+              if (matchPol) {
+                  const px = evaluateMath(matchPol[1], false);
+                  const py = evaluateMath(matchPol[2], false);
+                  const r = Math.sqrt(px * px + py * py);
+                  let theta = Math.atan2(py, px);
+                  if (angleMode === 'D') theta = theta * (180 / Math.PI);
+                  else if (angleMode === 'G') theta = theta * (200 / Math.PI);
+                  setVariables(prev => ({ ...prev, X: r, Y: theta }));
+                  return `r=${parseFloat(r.toPrecision(8))}, θ=${parseFloat(theta.toPrecision(8))}`;
+              }
+
+              const recRegex = /Rec\(([^,]+),([^)]+)\)/;
+              const matchRec = exp.match(recRegex);
+              if (matchRec) {
+                  const rr = evaluateMath(matchRec[1], false);
+                  let th = evaluateMath(matchRec[2], false);
+                  let rad = th;
+                  if (angleMode === 'D') rad = th * (Math.PI / 180);
+                  else if (angleMode === 'G') rad = th * (Math.PI / 200);
+                  const rx = rr * Math.cos(rad);
+                  const ry = rr * Math.sin(rad);
+                  setVariables(prev => ({ ...prev, X: rx, Y: ry }));
+                  return `x=${parseFloat(rx.toPrecision(8))}, y=${parseFloat(ry.toPrecision(8))}`;
+              }
+
+              // 6. Base-N Log: log_b(base, val)
+              const logBaseRegex = /log_b\(([^,]+),([^)]+)\)/;
+              let matchLogB = exp.match(logBaseRegex);
+              while (matchLogB) {
+                  const base = evaluateMath(matchLogB[1], false);
+                  const val = evaluateMath(matchLogB[2], false);
+                  const res = Math.log(val) / Math.log(base);
+                  exp = exp.replace(matchLogB[0], `(${res})`);
+                  matchLogB = exp.match(logBaseRegex);
+              }
+
+              // 7. Factorial & Permutation/Combination
+              const factLib = `
                 function fact(n) {
-                  if (n < 0) return NaN;
-                  if (Math.floor(n) !== n) return NaN; 
+                  if (n < 0 || Math.floor(n) !== n) return NaN;
                   if (n === 0 || n === 1) return 1;
-                  let res = 1;
-                  for (let i = 2; i <= n; i++) res *= i;
-                  return res;
+                  let r = 1; for (let i = 2; i <= n; i++) r *= i;
+                  return r;
                 }
                 function nPr(n, r) {
                   if (n < 0 || r < 0 || r > n) return NaN;
@@ -355,318 +584,993 @@
                   if (n < 0 || r < 0 || r > n) return NaN;
                   return fact(n) / (fact(r) * fact(n - r));
                 }
+                function RanInt(a, b) {
+                  return Math.floor(Math.random() * (b - a + 1)) + a;
+                }
               `;
 
-              let evalString = expression;
+              // Replace Factorials (e.g. 5!)
+              exp = exp.replace(/(\d+)!/g, 'fact($1)');
+              exp = exp.replace(/\(([^)]+)\)!/g, 'fact($1)');
 
-              const atom = "((?:\\d+(?:\\.\\d+)?)|(?:\\([^)]+\\)))"; 
-              const pRegex = new RegExp(`${atom}P${atom}`, 'g');
-              const cRegex = new RegExp(`${atom}C${atom}`, 'g');
+              // Replace nPr and nCr
+              const atom = "((?:\\d+(?:\\.\\d+)?)|(?:\\([^)]+\\)))";
+              exp = exp.replace(new RegExp(`${atom}P${atom}`, 'g'), 'nPr($1, $2)');
+              exp = exp.replace(new RegExp(`${atom}C${atom}`, 'g'), 'nCr($1, $2)');
 
-              let safety = 0;
-              while (pRegex.test(evalString) && safety < 10) {
-                evalString = evalString.replace(pRegex, 'nPr($1, $2)');
-                safety++;
-              }
-              safety = 0;
-              while (cRegex.test(evalString) && safety < 10) {
-                evalString = evalString.replace(cRegex, 'nCr($1, $2)');
-                safety++;
-              }
+              // 8. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
+              exp = exp
+                .replace(/(\d)(\()/g, '$1*$2')
+                .replace(/(\))(\d)/g, '$1*$2')
+                .replace(/(\))(\()/g, '$1*$2')
+                .replace(/(\d)(π|e)/g, '$1*$2')
+                .replace(/(π|e)(\d)/g, '$1*$2')
+                .replace(/(\d)(sin|cos|tan|log|ln|√)/g, '$1*$2');
 
-              evalString = evalString
+              // If X is still in exp, substitute with variables.X
+              exp = exp.replace(/\bX\b/g, `(${variables.X || 0})`);
+
+              // 9. Standard Math Replacements
+              exp = exp
                 .replace(/×/g, '*')
                 .replace(/÷/g, '/')
                 .replace(/π/g, 'Math.PI')
-                .replace(/e/g, 'Math.E')
+                .replace(/\be\b/g, 'Math.E')
                 .replace(/\^/g, '**')
+                .replace(/³√\(/g, 'Math.cbrt(')
                 .replace(/√\(/g, 'Math.sqrt(')
-                .replace(/√(\d+)/g, 'Math.sqrt($1)') 
+                .replace(/√(\d+)/g, 'Math.sqrt($1)')
+                .replace(/Ran#/g, '(Math.floor(Math.random()*1000)/1000)')
+                .replace(/RanInt#\(/g, 'RanInt(');
+
+              // 10. Degrees / Minutes / Seconds parsing: 12°30'0" -> 12.5
+              exp = exp.replace(/(\d+(?:\.\d+)?)°(?:(\d+(?:\.\d+)?)')?(?:(\d+(?:\.\d+)?)"?)/g, (m, d, min, s) => {
+                  const deg = parseFloat(d) || 0;
+                  const minutes = parseFloat(min) || 0;
+                  const seconds = parseFloat(s) || 0;
+                  return `(${deg + minutes / 60 + seconds / 3600})`;
+              });
+
+              // 11. Hyperbolic functions
+              exp = exp
+                .replace(/asinh\(/g, 'Math.asinh(')
+                .replace(/acosh\(/g, 'Math.acosh(')
+                .replace(/atanh\(/g, 'Math.atanh(')
+                .replace(/sinh\(/g, 'Math.sinh(')
+                .replace(/cosh\(/g, 'Math.cosh(')
+                .replace(/tanh\(/g, 'Math.tanh(');
+
+              // 12. Logarithms
+              exp = exp
                 .replace(/log\(/g, 'Math.log10(')
-                .replace(/ln\(/g, 'Math.log(')
-                .replace(/Ran#/g, 'Math.random()');
+                .replace(/ln\(/g, 'Math.log(');
 
-              // FIX: Handle Inverse Trig placeholders first to prevent collision with normal trig
-              evalString = evalString.replace(/asin\(/g, 'P_ASIN(');
-              evalString = evalString.replace(/acos\(/g, 'P_ACOS(');
-              evalString = evalString.replace(/atan\(/g, 'P_ATAN(');
+              // 13. Trigonometry Angle Modes
+              exp = exp.replace(/asin\(/g, 'TR_ASIN(');
+              exp = exp.replace(/acos\(/g, 'TR_ACOS(');
+              exp = exp.replace(/atan\(/g, 'TR_ATAN(');
 
-              // Handle Normal Trig
               if (angleMode === 'D') {
-                evalString = evalString.replace(/sin\(/g, 'Math.sin((Math.PI/180)*');
-                evalString = evalString.replace(/cos\(/g, 'Math.cos((Math.PI/180)*');
-                evalString = evalString.replace(/tan\(/g, 'Math.tan((Math.PI/180)*');
-              } else if (angleMode === 'R') {
-                evalString = evalString.replace(/sin\(/g, 'Math.sin(');
-                evalString = evalString.replace(/cos\(/g, 'Math.cos(');
-                evalString = evalString.replace(/tan\(/g, 'Math.tan(');
+                  exp = exp
+                    .replace(/sin\(/g, 'Math.sin((Math.PI/180)*')
+                    .replace(/cos\(/g, 'Math.cos((Math.PI/180)*')
+                    .replace(/tan\(/g, 'Math.tan((Math.PI/180)*')
+                    .replace(/TR_ASIN\(/g, '(180/Math.PI)*Math.asin(')
+                    .replace(/TR_ACOS\(/g, '(180/Math.PI)*Math.acos(')
+                    .replace(/TR_ATAN\(/g, '(180/Math.PI)*Math.atan(');
               } else if (angleMode === 'G') {
-                evalString = evalString.replace(/sin\(/g, 'Math.sin((Math.PI/200)*');
-                evalString = evalString.replace(/cos\(/g, 'Math.cos((Math.PI/200)*');
-                evalString = evalString.replace(/tan\(/g, 'Math.tan((Math.PI/200)*');
-              }
-
-              // Handle Inverse Trig (Replace placeholders)
-              if (angleMode === 'D') {
-                evalString = evalString.replace(/P_ASIN\(/g, '(180/Math.PI)*Math.asin(');
-                evalString = evalString.replace(/P_ACOS\(/g, '(180/Math.PI)*Math.acos(');
-                evalString = evalString.replace(/P_ATAN\(/g, '(180/Math.PI)*Math.atan(');
-              } else if (angleMode === 'R') {
-                evalString = evalString.replace(/P_ASIN\(/g, 'Math.asin(');
-                evalString = evalString.replace(/P_ACOS\(/g, 'Math.acos(');
-                evalString = evalString.replace(/P_ATAN\(/g, 'Math.atan(');
-              } else if (angleMode === 'G') {
-                evalString = evalString.replace(/P_ASIN\(/g, '(200/Math.PI)*Math.asin(');
-                evalString = evalString.replace(/P_ACOS\(/g, '(200/Math.PI)*Math.acos(');
-                evalString = evalString.replace(/P_ATAN\(/g, '(200/Math.PI)*Math.atan(');
-              }
-
-              const calcFunc = new Function(mathLib + 'return ' + evalString);
-              const res = calcFunc();
-
-              let finalRes = res;
-              if (!isFinite(res) || isNaN(res)) {
-                finalRes = 'Error';
+                  exp = exp
+                    .replace(/sin\(/g, 'Math.sin((Math.PI/200)*')
+                    .replace(/cos\(/g, 'Math.cos((Math.PI/200)*')
+                    .replace(/tan\(/g, 'Math.tan((Math.PI/200)*')
+                    .replace(/TR_ASIN\(/g, '(200/Math.PI)*Math.asin(')
+                    .replace(/TR_ACOS\(/g, '(200/Math.PI)*Math.acos(')
+                    .replace(/TR_ATAN\(/g, '(200/Math.PI)*Math.atan(');
               } else {
-                if (displayFormat === 'Fix') {
-                    finalRes = res.toFixed(4);
-                } else if (displayFormat === 'Sci') {
-                    finalRes = res.toExponential(4);
-                } else {
-                    finalRes = parseFloat(res.toPrecision(10)).toString();
-                }
+                  exp = exp
+                    .replace(/sin\(/g, 'Math.sin(')
+                    .replace(/cos\(/g, 'Math.cos(')
+                    .replace(/tan\(/g, 'Math.tan(')
+                    .replace(/TR_ASIN\(/g, 'Math.asin(')
+                    .replace(/TR_ACOS\(/g, 'Math.acos(')
+                    .replace(/TR_ATAN\(/g, 'Math.atan(');
               }
 
-              setResult(finalRes);
-              if (finalRes !== 'Error') {
-                  setHistory(prev => [finalRes, ...prev]);
+              // Evaluate safely
+              // eslint-disable-next-line no-new-func
+              const calcFn = new Function(factLib + 'return ' + exp);
+              const res = calcFn();
+
+              if (!formatResult) return res;
+
+              if (typeof res === 'string') return res;
+              if (isNaN(res) || !isFinite(res)) return 'Error';
+
+              // Format Output
+              let outStr = '';
+              if (displayFormat === 'Fix') {
+                  outStr = res.toFixed(4);
+              } else if (displayFormat === 'Sci') {
+                  outStr = res.toExponential(4);
+              } else {
+                  outStr = parseFloat(res.toPrecision(10)).toString();
+                  const sdVal = convertToSD(outStr);
+                  if (sdVal !== outStr) outStr = sdVal;
               }
-              setIsShift(false); 
-            } catch (err) {
-              setResult('Error');
-            }
+
+              return outStr;
           };
 
-          const insertAns = () => {
-              if (history.length > 0) {
-                  insert(history[0]);
+          // Main Equal (=) Evaluator
+          const handleEvaluate = () => {
+              if (isOff || !expression) return;
+
+              // Check if Equation solving with '=' is requested
+              if (expression.includes('=')) {
+                  handleSolve();
+                  return;
+              }
+
+              // Handle multi-statement expressions with ':'
+              if (expression.includes(':')) {
+                  const statements = expression.split(':');
+                  let lastRes = '';
+                  for (const stmt of statements) {
+                      if (stmt.trim()) {
+                          lastRes = evaluateMath(stmt);
+                      }
+                  }
+                  setResult(lastRes);
+                  if (lastRes !== 'Error') {
+                      const num = parseFloat(lastRes);
+                      if (!isNaN(num)) setAnsValue(num);
+                      setHistory(prev => [{ expression, result: lastRes }, ...prev]);
+                      setHistoryIdx(-1);
+                  }
+                  return;
+              }
+
+              try {
+                  const finalRes = evaluateMath(expression);
+                  setResult(finalRes);
+                  if (finalRes !== 'Error') {
+                      const num = parseFloat(finalRes);
+                      if (!isNaN(num)) setAnsValue(num);
+                      setHistory(prev => [{ expression, result: finalRes }, ...prev]);
+                      setHistoryIdx(-1);
+                  }
+              } catch (e) {
+                  setResult('Error');
+              }
+              setIsShift(false);
+              setIsAlpha(false);
+          };
+
+          // Numerical Equation Solver (SOLVE)
+          const handleSolve = () => {
+              if (isOff) return;
+              try {
+                  const parts = expression.split('=');
+                  const leftExp = parts[0];
+                  const rightExp = parts[1] || '0';
+
+                  // Newton-Raphson Solver
+                  let x = variables.X || 1.0;
+                  const tol = 1e-7;
+                  let iter = 0;
+                  let diff = 1;
+
+                  while (Math.abs(diff) > tol && iter < 100) {
+                      const fX = evalSingleVar(leftExp, 'X', x) - evalSingleVar(rightExp, 'X', x);
+                      const h = 1e-5;
+                      const fPrime = (
+                          (evalSingleVar(leftExp, 'X', x + h) - evalSingleVar(rightExp, 'X', x + h)) -
+                          (evalSingleVar(leftExp, 'X', x - h) - evalSingleVar(rightExp, 'X', x - h))
+                      ) / (2 * h);
+
+                      if (Math.abs(fPrime) < 1e-12) {
+                          x += 0.1;
+                          iter++;
+                          continue;
+                      }
+
+                      diff = fX / fPrime;
+                      x -= diff;
+                      iter++;
+                  }
+
+                  const rootVal = parseFloat(x.toPrecision(8));
+                  const leftVal = evalSingleVar(leftExp, 'X', rootVal);
+                  const rightVal = evalSingleVar(rightExp, 'X', rootVal);
+                  const residual = parseFloat((leftVal - rightVal).toPrecision(4));
+
+                  setVariables(prev => ({ ...prev, X: rootVal }));
+                  setResult(`X=${rootVal} (L-R=${residual})`);
+              } catch (e) {
+                  setResult('Error');
+              }
+              setIsShift(false);
+          };
+
+          // CALC Key: Prompts or Evaluates Variable X
+          const handleCalcKey = () => {
+              if (isOff) return;
+              if (isShift) {
+                  handleSolve();
+              } else if (expression.includes('X')) {
+                  setActiveMenu('CALC_INPUT');
+                  setCalcVarInput({ varName: 'X', value: variables.X.toString() });
+              } else {
+                  handleEvaluate();
+              }
+          };
+
+          // Menu Selection Handler
+          const handleMenuSelect = (choice) => {
+              if (activeMenu === 'MODE') {
+                  switch(choice) {
+                      case '1': setCalcMode('COMP'); break;
+                      case '2': setCalcMode('CMPLX'); break;
+                      case '3': setCalcMode('STAT'); break;
+                      case '4': setCalcMode('BASE-N'); break;
+                      case '5': setCalcMode('EQN'); break;
+                      case '6': setCalcMode('MATRIX'); break;
+                      case '7': setCalcMode('TABLE'); break;
+                      case '8': setCalcMode('VECTOR'); break;
+                      default: break;
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'SETUP') {
+                  switch(choice) {
+                      case '1': break; // MthIO
+                      case '2': break; // LineIO
+                      case '3': setAngleMode('D'); break;
+                      case '4': setAngleMode('R'); break;
+                      case '5': setAngleMode('G'); break;
+                      case '6': setDisplayFormat('Fix'); break;
+                      case '7': setDisplayFormat('Sci'); break;
+                      case '8': setDisplayFormat('Norm'); break;
+                      default: break;
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'HYP') {
+                  switch(choice) {
+                      case '1': insert('sinh('); break;
+                      case '2': insert('cosh('); break;
+                      case '3': insert('tanh('); break;
+                      case '4': insert('asinh('); break;
+                      case '5': insert('acosh('); break;
+                      case '6': insert('atanh('); break;
+                      default: break;
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'CONST') {
+                  const cObj = CONSTANTS.find(c => c.code === choice);
+                  if (cObj) {
+                      insert(cObj.val.toString());
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'CONV') {
+                  const convObj = CONVERSIONS.find(c => c.code === choice);
+                  if (convObj) {
+                      if (convObj.custom && result && !isNaN(parseFloat(result))) {
+                          setResult(convObj.custom(parseFloat(result)).toString());
+                      } else if (convObj.factor) {
+                          insert(`*${convObj.factor}`);
+                      }
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'CLR') {
+                  if (choice === '1') {
+                      setAngleMode('D');
+                      setDisplayFormat('Norm');
+                      setCalcMode('COMP');
+                      setResult('Reset Setup');
+                  } else if (choice === '2') {
+                      setVariables({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0 });
+                      setAnsValue(0);
+                      setResult('Reset Memory');
+                  } else if (choice === '3') {
+                      setAngleMode('D');
+                      setDisplayFormat('Norm');
+                      setCalcMode('COMP');
+                      setVariables({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0 });
+                      setAnsValue(0);
+                      setExpression('');
+                      setResult('Reset All');
+                  }
+                  setActiveMenu(null);
+              } else if (activeMenu === 'DRG') {
+                  if (result && !isNaN(parseFloat(result))) {
+                      const val = parseFloat(result);
+                      if (choice === '1') {
+                          if (angleMode === 'R') setResult((val * 180 / Math.PI).toString());
+                          if (angleMode === 'G') setResult((val * 180 / 200).toString());
+                      } else if (choice === '2') {
+                          if (angleMode === 'D') setResult((val * Math.PI / 180).toString());
+                          if (angleMode === 'G') setResult((val * Math.PI / 200).toString());
+                      } else if (choice === '3') {
+                          if (angleMode === 'D') setResult((val * 200 / 180).toString());
+                          if (angleMode === 'R') setResult((val * 200 / Math.PI).toString());
+                      }
+                  }
+                  setActiveMenu(null);
               }
           };
 
           return (
-            <div className="min-h-screen bg-gradient-to-br from-[#1a4023] via-[#365E32] to-[#7AC143] flex items-center justify-center p-4 font-sans select-none">
+            <div className="min-h-screen bg-gradient-to-br from-[#1a4023] via-[#365E32] to-[#7AC143] flex items-center justify-center p-2 font-sans select-none">
               
-              {/* Calculator Body */}
-              <div className="relative w-[360px] h-[720px] bg-slate-800 rounded-[40px] shadow-[0_30px_60px_rgba(0,0,0,0.6),inset_0_-4px_6px_rgba(0,0,0,0.5)] overflow-hidden border-4 border-[#7AC143] flex flex-col">
+              {/* Calculator Body Chassis */}
+              <div className="relative w-[390px] bg-slate-900 rounded-[44px] shadow-[0_25px_60px_rgba(0,0,0,0.8),inset_0_-4px_8px_rgba(0,0,0,0.6)] overflow-hidden border-4 border-[#7AC143] flex flex-col p-4 pb-5">
                 
-                {/* --- Top Section: Branding & Solar --- */}
-                <div className="px-6 pt-8 pb-2 flex justify-between items-start relative z-10">
+                {/* --- Top Section: Branding & Solar Cell --- */}
+                <div className="px-2 pt-1 pb-2 flex justify-between items-start relative z-10">
                   <div>
-                    <div className="font-bold text-white text-lg tracking-wide drop-shadow-sm">CIOALTUTORS</div>
-                    <div className="text-[#d9f99d] text-xs italic font-semibold">WhatsApp us on:</div>
-                    <div className="text-yellow-400 text-[10px] font-bold mt-1 tracking-wider">+923459069492</div>
+                    <div className="font-extrabold text-white text-base tracking-wider drop-shadow-sm flex items-center gap-1.5">
+                      <span>CASIO</span>
+                      <span className="text-xs font-semibold text-slate-300">fx-991ES PLUS</span>
+                    </div>
+                    <div className="text-[#7AC143] text-[11px] font-bold italic tracking-wide">
+                      NATURAL-V.P.A.M.
+                    </div>
+                    <div className="text-[#d9f99d] text-[9px] font-semibold mt-0.5">
+                      Cioal Tutors: <span className="text-yellow-400 font-bold">+923459069492</span>
+                    </div>
                   </div>
+
                   <div className="flex flex-col items-end">
-                     {/* Solar Panel */}
-                     <div className="w-16 h-6 bg-[#1f2e1f] rounded border border-[#568a2e] shadow-inner opacity-90 flex overflow-hidden">
-                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
-                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
-                        <div className="w-1/4 h-full border-r border-[#7AC143]/30"></div>
+                     {/* Solar Cell Grid */}
+                     <div className="w-18 h-7 bg-[#231b12] rounded border border-[#7AC143]/40 shadow-inner flex overflow-hidden p-0.5 gap-0.5">
+                        <div className="flex-1 bg-[#422e1b] rounded-sm opacity-90 border-r border-[#7AC143]/20"></div>
+                        <div className="flex-1 bg-[#422e1b] rounded-sm opacity-90 border-r border-[#7AC143]/20"></div>
+                        <div className="flex-1 bg-[#422e1b] rounded-sm opacity-90 border-r border-[#7AC143]/20"></div>
+                        <div className="flex-1 bg-[#422e1b] rounded-sm opacity-90"></div>
                      </div>
-                     <div className="text-[8px] text-[#bef264] font-bold mt-1 uppercase">Two Way Power</div>
+                     <div className="text-[7px] text-[#bef264] font-bold mt-1 tracking-widest uppercase">Two Way Power</div>
                   </div>
                 </div>
 
-                {/* --- Display Container --- */}
-                <div className="mx-6 mb-4 p-4 bg-[#f7fee7] rounded-xl border-2 border-[#7AC143] shadow-[inset_0_2px_8px_rgba(0,0,0,0.1)] h-32 flex flex-col relative font-mono overflow-hidden">
+                {/* --- LCD Natural Display Container --- */}
+                <div className={`mx-1 mb-2.5 p-3 rounded-xl border-2 border-[#7AC143] shadow-[inset_0_2px_10px_rgba(0,0,0,0.25)] h-32 flex flex-col relative font-mono transition-colors duration-200 ${isOff ? 'bg-[#182618] border-green-900/50' : 'bg-[#eef8dd]'}`}>
                     
-                    {/* 1. Status Indicators */}
-                    {!activeMenu && (
-                      <div className="flex justify-between text-[10px] text-[#14532d] font-bold opacity-80 mb-1 border-b border-[#14532d]/10 pb-1">
-                          <div className="flex gap-2">
-                              <span className={isShift ? "text-black bg-yellow-300 px-1 rounded-sm" : "text-transparent px-1"}>S</span>
-                              <span className="text-transparent">A</span>
-                              <span className={angleMode === 'D' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>D</span>
-                              <span className={angleMode === 'R' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>R</span>
-                              <span className={angleMode === 'G' ? "text-black bg-black/10 px-1 rounded-sm" : "text-transparent px-1"}>G</span>
-                              
-                              <span className={displayFormat === 'Fix' ? "text-black" : "text-transparent"}>FIX</span>
-                              <span className={displayFormat === 'Sci' ? "text-black" : "text-transparent"}>SCI</span>
-                          </div>
-                          <div className="flex gap-2">
-                             {calcMode !== 'COMP' && <span className="text-black bg-black/5 px-1 rounded-sm">{calcMode}</span>}
-                          </div>
+                    {isOff ? (
+                      <div className="w-full h-full flex items-center justify-center text-green-900/30 text-xs font-bold tracking-widest">
+                        POWER OFF
                       </div>
-                    )}
-
-                    {/* 2. Menu Overlay or Normal Display */}
-                    {activeMenu === 'MODE' ? (
-                        <div className="absolute inset-0 bg-[#f7fee7] z-20 p-2 text-[#14532d] text-xs font-bold grid grid-cols-2 gap-x-2 gap-y-1 content-start">
-                            <div>1:COMP</div>
-                            <div>2:CMPLX</div>
-                            <div>3:STAT</div>
-                            <div>4:BASE-N</div>
-                            <div>5:EQN</div>
-                            <div>6:MATRIX</div>
-                            <div>7:TABLE</div>
-                            <div>8:VECTOR</div>
-                        </div>
-                    ) : activeMenu === 'SETUP' ? (
-                        <div className="absolute inset-0 bg-[#f7fee7] z-20 p-2 text-[#14532d] text-xs font-bold grid grid-cols-2 gap-x-2 gap-y-1 content-start">
-                            <div>1:MthIO</div>
-                            <div>2:LineIO</div>
-                            <div>3:Deg</div>
-                            <div>4:Rad</div>
-                            <div>5:Gra</div>
-                            <div>6:Fix</div>
-                            <div>7:Sci</div>
-                            <div>8:Norm</div>
-                        </div>
                     ) : (
-                        <>
-                            {/* Expression Line with Cursor */}
-                            <div 
-                                ref={scrollRef}
-                                className="text-lg text-[#14532d] overflow-x-auto whitespace-nowrap scrollbar-hide w-full font-semibold tracking-widest h-8 mt-1 flex items-center"
-                            >
-                                <span>{expression.slice(0, cursorPos)}</span>
-                                <span ref={cursorRef} className="cursor-blink"></span>
-                                <span>{expression.slice(cursorPos)}</span>
+                      <>
+                        {/* 1. Casio LCD Status Indicators Bar */}
+                        <div className="flex justify-between text-[9px] text-[#14532d] font-bold opacity-85 border-b border-[#14532d]/15 pb-0.5 leading-none">
+                            <div className="flex gap-1.5 items-center">
+                                <span className={isShift ? "text-slate-900 bg-yellow-400 px-1 rounded-sm" : "opacity-0"}>S</span>
+                                <span className={isAlpha ? "text-white bg-red-500 px-1 rounded-sm" : "opacity-0"}>A</span>
+                                <span className={variables.M !== 0 ? "text-black bg-black/10 px-1 rounded-sm" : "opacity-0"}>M</span>
+                                <span className={stoActive ? "text-black bg-yellow-300 px-1 rounded-sm" : "opacity-0"}>STO</span>
+                                <span className={rclActive ? "text-black bg-yellow-300 px-1 rounded-sm" : "opacity-0"}>RCL</span>
+                                
+                                <span className="text-black font-extrabold px-1 bg-black/5 rounded-sm">{angleMode}</span>
+                                {displayFormat !== 'Norm' && <span className="text-black bg-black/5 px-1 rounded-sm">{displayFormat}</span>}
                             </div>
+                            
+                            <div className="flex gap-1.5 items-center">
+                               {calcMode !== 'COMP' && <span className="text-black bg-black/5 px-1 rounded-sm">{calcMode}</span>}
+                               <span className="text-[#14532d] text-[8px] font-bold">Math</span>
+                               <span className="text-[7px] text-[#14532d]">{history.length > 0 ? "▲▼" : ""}</span>
+                            </div>
+                        </div>
 
-                            {/* Result Line */}
-                            <div className="text-right text-3xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto">
-                                {result || (expression ? '' : '0')}
+                        {/* 2. Interactive Menu Overlays inside LCD Screen */}
+                        {activeMenu === 'MODE' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold grid grid-cols-2 gap-x-2 gap-y-0.5 content-start p-1">
+                                <div>1: COMP</div> <div>2: CMPLX</div>
+                                <div>3: STAT</div> <div>4: BASE-N</div>
+                                <div>5: EQN</div>  <div>6: MATRIX</div>
+                                <div>7: TABLE</div><div>8: VECTOR</div>
                             </div>
-                        </>
+                        ) : activeMenu === 'SETUP' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold grid grid-cols-2 gap-x-2 gap-y-0.5 content-start p-1">
+                                <div>1: MthIO</div> <div>2: LineIO</div>
+                                <div>3: Deg</div>   <div>4: Rad</div>
+                                <div>5: Gra</div>   <div>6: Fix</div>
+                                <div>7: Sci</div>   <div>8: Norm</div>
+                            </div>
+                        ) : activeMenu === 'HYP' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold grid grid-cols-2 gap-x-2 gap-y-0.5 content-start p-1">
+                                <div>1: sinh</div>  <div>2: cosh</div>
+                                <div>3: tanh</div>  <div>4: sinh⁻¹</div>
+                                <div>5: cosh⁻¹</div><div>6: tanh⁻¹</div>
+                            </div>
+                        ) : activeMenu === 'CONST' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[9px] font-bold p-1">
+                                <div className="text-[8px] border-b border-[#14532d]/20 pb-0.5 mb-1">CONST: Press 1-9 or 0</div>
+                                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                                    <div>1: c  (light)</div> <div>2: h  (Planck)</div>
+                                    <div>3: G  (grav)</div>  <div>4: g  (9.806)</div>
+                                    <div>5: e  (charge)</div><div>6: me (electron)</div>
+                                    <div>7: mp (proton)</div><div>8: Na (Avogadro)</div>
+                                </div>
+                            </div>
+                        ) : activeMenu === 'CONV' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[9px] font-bold p-1">
+                                <div className="text-[8px] border-b border-[#14532d]/20 pb-0.5 mb-1">CONV (Press 1-8, 9, 0):</div>
+                                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                                    <div>1: km/h➔m/s</div> <div>2: m/s➔km/h</div>
+                                    <div>3: in➔cm</div>    <div>4: cm➔in</div>
+                                    <div>5: ft➔m</div>     <div>6: m➔ft</div>
+                                    <div>7: lb➔kg</div>    <div>8: kg➔lb</div>
+                                </div>
+                            </div>
+                        ) : activeMenu === 'CLR' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold p-1">
+                                <div className="border-b border-[#14532d]/20 pb-0.5 mb-1">Reset? [1-3]</div>
+                                <div>1: Setup Data</div>
+                                <div>2: Memory Data</div>
+                                <div>3: Initialize All</div>
+                            </div>
+                        ) : activeMenu === 'DRG' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold p-1">
+                                <div className="border-b border-[#14532d]/20 pb-0.5 mb-1">Convert Ans Angle to:</div>
+                                <div>1: ° (Degrees)</div>
+                                <div>2: r (Radians)</div>
+                                <div>3: g (Gradians)</div>
+                            </div>
+                        ) : activeMenu === 'CALC_INPUT' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-xs font-bold p-2 flex flex-col justify-between">
+                                <div>X? {calcVarInput.value}<span className="cursor-blink"></span></div>
+                                <div className="text-[9px] opacity-75">Enter value on keypad & press [=]</div>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Expression Line with Cursor */}
+                                <div 
+                                    ref={scrollRef}
+                                    className="text-base text-[#14532d] overflow-x-auto whitespace-nowrap scrollbar-hide w-full font-semibold tracking-wider h-7 mt-0.5 flex items-center"
+                                >
+                                    <span>{expression.slice(0, cursorPos)}</span>
+                                    <span ref={cursorRef} className="cursor-blink"></span>
+                                    <span>{expression.slice(cursorPos)}</span>
+                                </div>
+
+                                {/* Result Line */}
+                                <div className="text-right text-2xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto">
+                                    {result || (expression ? '' : '0')}
+                                </div>
+                            </>
+                        )}
+                      </>
                     )}
                 </div>
 
                 {/* --- Controls Section --- */}
-                <div className="flex-1 px-5 pb-8 flex flex-col gap-1 bg-slate-800/50 rounded-b-[36px]">
+                <div className="flex-1 flex flex-col gap-1">
                     
-                    {/* Row 1: Shift, Alpha, Replay, Mode, On */}
-                    <div className="grid grid-cols-5 gap-2 mb-2 items-end h-16 relative">
-                         <CalculatorButton 
-                            label="SHIFT" 
-                            color="bg-[#568a2e]" 
-                            isActive={isShift}
-                            textClass="text-[10px] text-white" 
-                            shape="rounded-full w-10 h-6" 
-                            subLabel={{text: "SOLVE", color: "text-yellow-300"}} 
-                            onClick={() => setIsShift(!isShift)}
-                         />
-                         <CalculatorButton label="ALPHA" color="bg-[#568a2e]" textClass="text-[10px] text-yellow-300" shape="rounded-full w-10 h-6" />
-                         
-                         {/* Replay D-Pad (Interactive) */}
-                         <div className="flex items-center justify-center -mt-2">
-                            <div className="w-16 h-16 bg-[#3f6212] rounded-full border border-[#65a30d] shadow-[0_4px_8px_rgba(0,0,0,0.4)] relative flex items-center justify-center overflow-hidden">
-                                <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#4d7c0f] to-[#1a2e05] opacity-80 pointer-events-none"></div>
-                                <span className="text-[8px] text-[#ecfccb] font-bold z-10 mb-1 drop-shadow-sm pointer-events-none">REPLAY</span>
-                                
-                                {/* Invisible Click Zones for Arrows */}
-                                <div onClick={moveCursorLeft} className="absolute left-0 top-0 bottom-0 w-5 bg-transparent z-20 cursor-pointer active:bg-white/10"></div>
-                                <div onClick={moveCursorRight} className="absolute right-0 top-0 bottom-0 w-5 bg-transparent z-20 cursor-pointer active:bg-white/10"></div>
-                                
-                                <div className="absolute top-1 text-[8px] text-[#bef264] pointer-events-none">▲</div>
-                                <div className="absolute bottom-1 text-[8px] text-[#bef264] pointer-events-none">▼</div>
-                                <div className="absolute left-1 text-[8px] text-[#bef264] pointer-events-none">◀</div>
-                                <div className="absolute right-1 text-[8px] text-[#bef264] pointer-events-none">▶</div>
-                            </div>
-                         </div>
+                    {/* Top Flanking Control Block with REPLAY Wheel in Center */}
+                    <div className="grid grid-cols-5 gap-1.5 mb-1 items-center">
+                        
+                        {/* Left 2x2 Column: SHIFT, ALPHA / CALC, ∫dx */}
+                        <div className="col-span-2 grid grid-cols-2 gap-1.5">
+                            <CalculatorButton 
+                                label="SHIFT" 
+                                color="bg-[#568a2e]" 
+                                isActive={isShift}
+                                textClass="text-[10px] text-yellow-300 font-bold" 
+                                shape="rounded-full" 
+                                onClick={() => setIsShift(!isShift)}
+                            />
+                            <CalculatorButton 
+                                label="ALPHA" 
+                                color="bg-[#568a2e]" 
+                                isActive={isAlpha}
+                                textClass="text-[10px] text-red-300 font-bold" 
+                                shape="rounded-full" 
+                                onClick={() => setIsAlpha(!isAlpha)}
+                            />
+                            <CalculatorButton 
+                                label="CALC" 
+                                subShift="SOLVE" 
+                                subAlpha="=" 
+                                color="bg-[#1a4023]" 
+                                onClick={() => {
+                                    if (isAlpha) insert('=');
+                                    else handleCalcKey();
+                                }}
+                            />
+                            <CalculatorButton 
+                                label="∫dx" 
+                                subShift="d/dx" 
+                                subAlpha=":" 
+                                color="bg-[#1a4023]" 
+                                onClick={() => {
+                                    if (isAlpha) insert(':');
+                                    else if (isShift) insert('d/dx(');
+                                    else insert('∫(');
+                                }}
+                            />
+                        </div>
 
-                         {/* MODE Button triggers Menu */}
-                         <CalculatorButton 
-                            label="MODE" 
-                            subLabel={{text: "SETUP", color: "text-yellow-300"}} 
-                            color="bg-[#568a2e]" 
-                            textClass="text-[10px] text-white" 
-                            shape="rounded-full w-10 h-6" 
-                            onClick={openModeOrSetup} 
-                         />
-                         
-                         <CalculatorButton label="ON" color="bg-[#568a2e]" textClass="text-[10px] text-white" shape="rounded-full w-10 h-6" onClick={clearAll} />
+                        {/* Center Column: 4-Way REPLAY Circular Disc */}
+                        <div className="col-span-1 flex items-center justify-center">
+                            <div className="w-[66px] h-[66px] bg-[#3f6212] rounded-full border-2 border-[#65a30d] shadow-[0_4px_10px_rgba(0,0,0,0.5)] relative flex items-center justify-center overflow-hidden">
+                                <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#4d7c0f] to-[#1a2e05] opacity-90 pointer-events-none"></div>
+                                <span className="text-[7px] text-[#ecfccb] font-extrabold z-10 tracking-tighter pointer-events-none">REPLAY</span>
+                                
+                                {/* 4-Way Click Zones */}
+                                <div onClick={navigateHistoryUp} className="absolute top-0 left-0 right-0 h-5 cursor-pointer z-20 flex items-start justify-center active:bg-white/20">
+                                    <span className="text-[8px] text-[#bef264] pointer-events-none mt-0.5">▲</span>
+                                </div>
+                                <div onClick={navigateHistoryDown} className="absolute bottom-0 left-0 right-0 h-5 cursor-pointer z-20 flex items-end justify-center active:bg-white/20">
+                                    <span className="text-[8px] text-[#bef264] pointer-events-none mb-0.5">▼</span>
+                                </div>
+                                <div onClick={moveCursorLeft} className="absolute left-0 top-0 bottom-0 w-5 cursor-pointer z-20 flex items-center justify-start active:bg-white/20">
+                                    <span className="text-[8px] text-[#bef264] pointer-events-none ml-1">◀</span>
+                                </div>
+                                <div onClick={moveCursorRight} className="absolute right-0 top-0 bottom-0 w-5 cursor-pointer z-20 flex items-center justify-end active:bg-white/20">
+                                    <span className="text-[8px] text-[#bef264] pointer-events-none mr-1">▶</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Right 2x2 Column: MODE, ON / x⁻¹, log_■ */}
+                        <div className="col-span-2 grid grid-cols-2 gap-1.5">
+                            <CalculatorButton 
+                                label="MODE" 
+                                subShift="SETUP" 
+                                color="bg-[#568a2e]" 
+                                textClass="text-[10px] text-white font-bold" 
+                                shape="rounded-full" 
+                                onClick={() => {
+                                    if (isShift) { setActiveMenu('SETUP'); setIsShift(false); }
+                                    else { setActiveMenu('MODE'); }
+                                }}
+                            />
+                            <CalculatorButton 
+                                label="ON" 
+                                color="bg-[#568a2e]" 
+                                textClass="text-[10px] text-white font-bold" 
+                                shape="rounded-full" 
+                                onClick={handlePowerOn}
+                            />
+                            <CalculatorButton 
+                                label="x⁻¹" 
+                                subShift="x!" 
+                                color="bg-[#1a4023]" 
+                                onClick={() => {
+                                    if (isShift) insert('!');
+                                    else insert('^(-1)');
+                                }}
+                            />
+                            <CalculatorButton 
+                                label="log_■" 
+                                subShift="Σ" 
+                                color="bg-[#1a4023]" 
+                                onClick={() => {
+                                    if (isShift) insert('Σ(');
+                                    else insert('log_b(');
+                                }}
+                            />
+                        </div>
                     </div>
 
-                    {/* Scientific Function Grid */}
-                    <div className="grid grid-cols-6 gap-2 mb-2">
-                        <CalculatorButton label="CALC" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
-                        <CalculatorButton label="∫dx" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('∫(')}/>
-                        <CalculatorButton label="x⁻¹" color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('^(-1)')}/>
-                        <CalculatorButton label="log" subLabel={{text: "10^x", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('log(', '10^(')}/>
-                        <CalculatorButton label="ln" subLabel={{text: "e^x", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('ln(', 'e^(')}/>
-                        <CalculatorButton label="x²" subLabel={{text: "√", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('^2', '√(')}/>
+                    {/* --- Scientific Function Grid (3 Rows x 6 Columns) --- */}
+                    <div className="grid grid-cols-6 gap-1.5 mb-1">
                         
-                        <CalculatorButton label="(-)" subLabel={{text: "A", color: "text-red-400"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => insert('-')}/>
-                        <CalculatorButton label="hyp" subLabel={{text: "B", color: "text-red-400"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
-                        <CalculatorButton label="sin" subLabel={{text: "sin⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('sin(', 'asin(')}/>
-                        <CalculatorButton label="cos" subLabel={{text: "cos⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('cos(', 'acos(')}/>
-                        <CalculatorButton label="tan" subLabel={{text: "tan⁻¹", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('tan(', 'atan(')}/>
-                        <CalculatorButton label="xʸ" subLabel={{text: "x√", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('^', '^(1/')}/>
+                        {/* Function Row 1: Fraction, Root, Square, Power, Log, Ln */}
+                        <CalculatorButton 
+                            label="믐" 
+                            subShift="d/c" 
+                            onClick={() => {
+                                if (isShift) handleSD(true);
+                                else insert('/');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="√■" 
+                            subShift="³√" 
+                            onClick={() => {
+                                if (isShift) insert('³√(');
+                                else insert('√(');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="x²" 
+                            subShift="x³" 
+                            onClick={() => {
+                                if (isShift) insert('^3');
+                                else insert('^2');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="x^■" 
+                            subShift="ˣ√" 
+                            onClick={() => {
+                                if (isShift) insert('^(1/');
+                                else insert('^');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="log" 
+                            subShift="10^■" 
+                            onClick={() => {
+                                if (isShift) insert('10^(');
+                                else insert('log(');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="ln" 
+                            subShift="e^■" 
+                            onClick={() => {
+                                if (isShift) insert('e^(');
+                                else insert('ln(');
+                            }}
+                        />
 
-                        <CalculatorButton label="RCL" subLabel={{text: "STO", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
-                        <CalculatorButton label="ENG" subLabel={{text: "←", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
-                        <CalculatorButton label="(" subLabel={{text: "%", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress('(', '/100')}/>
-                        <CalculatorButton label=")" subLabel={{text: ",", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" onClick={() => handleButtonPress(')', ',')}/>
-                        
-                        {/* S<=>D Button */}
+                        {/* Function Row 2: (-), DMS, hyp, sin, cos, tan */}
+                        <CalculatorButton 
+                            label="(-)" 
+                            subShift="∠" 
+                            subAlpha="A" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('A');
+                                else if (isShift) insert('∠');
+                                else insert('-');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="° ' ''" 
+                            subShift="←" 
+                            subAlpha="B" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('B');
+                                else handleDMS();
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="hyp" 
+                            subAlpha="C" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('C');
+                                else setActiveMenu('HYP');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="sin" 
+                            subShift="sin⁻¹" 
+                            subAlpha="D" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('D');
+                                else if (isShift) insert('asin(');
+                                else insert('sin(');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="cos" 
+                            subShift="cos⁻¹" 
+                            subAlpha="E" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('E');
+                                else if (isShift) insert('acos(');
+                                else insert('cos(');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="tan" 
+                            subShift="tan⁻¹" 
+                            subAlpha="F" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('F');
+                                else if (isShift) insert('atan(');
+                                else insert('tan(');
+                            }}
+                        />
+
+                        {/* Function Row 3: RCL, ENG, (, ), S<=>D, M+ */}
+                        <CalculatorButton 
+                            label="RCL" 
+                            subShift="STO" 
+                            onClick={() => {
+                                if (isShift) {
+                                    setStoActive(true);
+                                    setRclActive(false);
+                                    setIsShift(false);
+                                } else {
+                                    setRclActive(true);
+                                    setStoActive(false);
+                                }
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="ENG" 
+                            subShift="←" 
+                            onClick={() => {
+                                if (isShift) handleENG(true);
+                                else handleENG(false);
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="(" 
+                            subShift="%" 
+                            onClick={() => {
+                                if (isShift) insert('/100');
+                                else insert('(');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label=")" 
+                            subShift="," 
+                            subAlpha="X" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('X');
+                                else if (isShift) insert(',');
+                                else insert(')');
+                            }}
+                        />
                         <CalculatorButton 
                             label="S⇔D" 
-                            color="bg-[#1a4023]" 
-                            textClass="text-[10px]" 
-                            shape="rounded-[4px] h-6" 
-                            onClick={handleSD}
+                            subShift="a b/c" 
+                            subAlpha="Y" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('Y');
+                                else if (isShift) handleSD(true);
+                                else handleSD(false);
+                            }}
                         />
-                        
-                        <CalculatorButton label="M+" subLabel={{text: "M-", color: "text-yellow-300"}} color="bg-[#1a4023]" textClass="text-[10px]" shape="rounded-[4px] h-6" />
+                        <CalculatorButton 
+                            label="M+" 
+                            subShift="M-" 
+                            subAlpha="M" 
+                            onClick={() => {
+                                if (isAlpha || stoActive || rclActive) handleVariableKey('M');
+                                else if (isShift) handleMemoryAdd(true);
+                                else handleMemoryAdd(false);
+                            }}
+                        />
                     </div>
 
-                    {/* Number Pad Area */}
-                    <div className="grid grid-cols-5 gap-3 mt-2 h-full">
-                        <CalculatorButton label="7" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('7')}/>
-                        <CalculatorButton label="8" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('8')}/>
-                        <CalculatorButton label="9" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('9')}/>
-                        <CalculatorButton label="DEL" subLabel={{text: "INS", color: "text-yellow-300"}} color="bg-[#eab308]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-sm font-bold" onClick={deleteChar}/>
-                        <CalculatorButton label="AC" subLabel={{text: "OFF", color: "text-yellow-300"}} color="bg-[#eab308]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-sm font-bold" onClick={() => handleButtonPress(clearAll, clearAll, true)}/>
-
-                        <CalculatorButton label="4" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('4')}/>
-                        <CalculatorButton label="5" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('5')}/>
-                        <CalculatorButton label="6" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('6')}/>
+                    {/* --- Number Keypad Matrix (4 Rows x 5 Columns) --- */}
+                    <div className="grid grid-cols-5 gap-1.5 mt-0.5">
                         
-                        {/* Multiply / nPr Button */}
-                        <CalculatorButton label="×" subLabel={{text: "nPr", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('×', 'P')}/>
-                        
-                        {/* Divide / nCr Button */}
-                        <CalculatorButton label="÷" subLabel={{text: "nCr", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('÷', 'C')}/>
-
-                        <CalculatorButton label="1" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('1')}/>
-                        <CalculatorButton label="2" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('2')}/>
-                        <CalculatorButton label="3" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('3')}/>
-                        <CalculatorButton label="+" subLabel={{text: "Pol", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => insert('+')}/>
-                        <CalculatorButton label="-" subLabel={{text: "Rec", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => insert('-')}/>
-
-                        <CalculatorButton label="0" color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('0')}/>
-                        <CalculatorButton label="." subLabel={{text: "Ran#", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-lg font-bold" onClick={() => handleButtonPress('.', 'Ran#')}/>
-                        <CalculatorButton label="x10ˣ" subLabel={{text: "π", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-xs font-bold" onClick={() => handleButtonPress('×10^', 'π')}/>
-                        
-                        {/* Ans Button with Shift DRG */}
+                        {/* Keypad Row 1: 7, 8, 9, DEL, AC */}
                         <CalculatorButton 
-                            label="Ans" 
-                            subLabel={{text: "DRG", color: "text-yellow-300"}} 
+                            label="7" 
+                            subShift="CONST" 
                             color="bg-[#f4fce3]" 
                             textColor="text-[#14532d]" 
-                            shape="rounded-md h-9" 
-                            textClass="text-xs font-bold" 
-                            onClick={() => handleButtonPress(insertAns, toggleDRG, true)}
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('7');
+                                else if (isShift) setActiveMenu('CONST');
+                                else insert('7');
+                            }}
                         />
-                        
-                        <CalculatorButton label="=" subLabel={{text: "%", color: "text-yellow-300"}} color="bg-[#f4fce3]" textColor="text-[#14532d]" shape="rounded-md h-9" textClass="text-xl font-bold" onClick={() => handleButtonPress(evaluate, evaluate, true)}/>
+                        <CalculatorButton 
+                            label="8" 
+                            subShift="CONV" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('8');
+                                else if (isShift) setActiveMenu('CONV');
+                                else insert('8');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="9" 
+                            subShift="CLR" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('9');
+                                else if (isShift) setActiveMenu('CLR');
+                                else insert('9');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="DEL" 
+                            subShift="INS" 
+                            color="bg-[#f59e0b]" 
+                            textColor="text-slate-950" 
+                            textClass="text-sm font-extrabold" 
+                            onClick={deleteChar}
+                        />
+                        <CalculatorButton 
+                            label="AC" 
+                            subShift="OFF" 
+                            color="bg-[#f59e0b]" 
+                            textColor="text-slate-950" 
+                            textClass="text-sm font-extrabold" 
+                            onClick={() => {
+                                if (isShift) handlePowerOff();
+                                else clearAll();
+                            }}
+                        />
+
+                        {/* Keypad Row 2: 4, 5, 6, ×, ÷ */}
+                        <CalculatorButton 
+                            label="4" 
+                            subShift="MATRIX" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('4');
+                                else insert('4');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="5" 
+                            subShift="VECTOR" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('5');
+                                else insert('5');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="6" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('6');
+                                else insert('6');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="×" 
+                            subShift="nPr" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xl font-bold" 
+                            onClick={() => {
+                                if (isShift) insert('P');
+                                else insert('×');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="÷" 
+                            subShift="nCr" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xl font-bold" 
+                            onClick={() => {
+                                if (isShift) insert('C');
+                                else insert('÷');
+                            }}
+                        />
+
+                        {/* Keypad Row 3: 1, 2, 3, +, - */}
+                        <CalculatorButton 
+                            label="1" 
+                            subShift="STAT" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('1');
+                                else insert('1');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="2" 
+                            subShift="CMPLX" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('2');
+                                else insert('2');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="3" 
+                            subShift="BASE" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('3');
+                                else insert('3');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="+" 
+                            subShift="Pol" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xl font-bold" 
+                            onClick={() => {
+                                if (isShift) insert('Pol(');
+                                else insert('+');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="-" 
+                            subShift="Rec" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xl font-bold" 
+                            onClick={() => {
+                                if (isShift) insert('Rec(');
+                                else insert('-');
+                            }}
+                        />
+
+                        {/* Keypad Row 4: 0, •, ×10ˣ, Ans, = */}
+                        <CalculatorButton 
+                            label="0" 
+                            subShift="Rnd" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (activeMenu) handleMenuSelect('0');
+                                else insert('0');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="•" 
+                            subShift="Ran#" 
+                            subAlpha="RanInt" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-lg font-bold" 
+                            onClick={() => {
+                                if (isAlpha) insert('RanInt#(');
+                                else if (isShift) insert('Ran#');
+                                else insert('.');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="×10ˣ" 
+                            subShift="π" 
+                            subAlpha="e" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xs font-extrabold" 
+                            onClick={() => {
+                                if (isAlpha) insert('e');
+                                else if (isShift) insert('π');
+                                else insert('*10^');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="Ans" 
+                            subShift="DRG▶" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-xs font-bold" 
+                            onClick={() => {
+                                if (isShift) setActiveMenu('DRG');
+                                else insert('Ans');
+                            }}
+                        />
+                        <CalculatorButton 
+                            label="=" 
+                            color="bg-[#f4fce3]" 
+                            textColor="text-[#14532d]" 
+                            textClass="text-2xl font-black" 
+                            onClick={() => {
+                                if (activeMenu === 'CALC_INPUT') {
+                                    const val = parseFloat(calcVarInput.value) || 0;
+                                    setVariables(prev => ({ ...prev, [calcVarInput.varName]: val }));
+                                    setActiveMenu(null);
+                                    handleEvaluate();
+                                } else {
+                                    handleEvaluate();
+                                }
+                            }}
+                        />
                     </div>
                 </div>
                 
-                {/* Footer info */}
-                <div className="absolute bottom-2 w-full text-center text-[8px] text-[#bef264] opacity-50">
-                    Powered by React • Cioal Tutors Theme
+                {/* Subtle bottom tag */}
+                <div className="text-center text-[8px] text-[#bef264] opacity-60 mt-2">
+                    Casio fx-991ES PLUS Natural-V.P.A.M. • Cioal Tutors Edition
                 </div>
               </div>
             </div>
