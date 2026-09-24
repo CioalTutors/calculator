@@ -336,6 +336,168 @@
             return <span>{res}</span>;
         };
 
+        // --- Casio fx-991ES PLUS EQN Solvers ---
+        const formatEqnNum = (val) => {
+            if (Math.abs(val) < 1e-12) return '0';
+            return parseFloat(val.toPrecision(10)).toString();
+        };
+
+        const solveQuadratic = (a, b, c) => {
+            if (a === 0) {
+                if (b === 0) {
+                    return c === 0 ? [{ label: 'Infinite Sol', val: 'All Real X' }] : [{ label: 'No Solution', val: 'No Solution' }];
+                }
+                const x = -c / b;
+                return [{ label: 'X', val: formatEqnNum(x) }];
+            }
+
+            const D = b * b - 4 * a * c;
+            const xv = -b / (2 * a);
+            const yv = c - (b * b) / (4 * a);
+            const minMaxLabel = a > 0 ? 'Minimum' : 'Maximum';
+
+            const vertexResults = [
+                { label: `X-Value ${minMaxLabel}`, val: formatEqnNum(xv) },
+                { label: `Y-Value ${minMaxLabel}`, val: formatEqnNum(yv) }
+            ];
+
+            if (Math.abs(D) < 1e-12) {
+                const x = -b / (2 * a);
+                return [
+                    { label: 'X', val: formatEqnNum(x) },
+                    ...vertexResults
+                ];
+            } else if (D > 0) {
+                const sqrtD = Math.sqrt(D);
+                const x1 = (-b + sqrtD) / (2 * a);
+                const x2 = (-b - sqrtD) / (2 * a);
+                return [
+                    { label: 'X1', val: formatEqnNum(x1) },
+                    { label: 'X2', val: formatEqnNum(x2) },
+                    ...vertexResults
+                ];
+            } else {
+                const real = -b / (2 * a);
+                const imag = Math.sqrt(-D) / (2 * a);
+                const realStr = Math.abs(real) < 1e-12 ? '' : formatEqnNum(real);
+                const imagAbs = Math.abs(imag);
+                const imagStr = Math.abs(imagAbs - 1) < 1e-12 ? 'i' : `${formatEqnNum(imagAbs)}i`;
+                
+                let x1Str, x2Str;
+                if (!realStr) {
+                    x1Str = `${imagStr}`;
+                    x2Str = `-${imagStr}`;
+                } else {
+                    x1Str = `${realStr}+${imagStr}`;
+                    x2Str = `${realStr}-${imagStr}`;
+                }
+
+                return [
+                    { label: 'X1', val: x1Str },
+                    { label: 'X2', val: x2Str },
+                    ...vertexResults
+                ];
+            }
+        };
+
+        const solveSimultaneous2 = (a1, b1, c1, a2, b2, c2) => {
+            const D = a1 * b2 - a2 * b1;
+            const Dx = c1 * b2 - c2 * b1;
+            const Dy = a1 * c2 - a2 * c1;
+
+            if (Math.abs(D) < 1e-12) {
+                if (Math.abs(Dx) < 1e-12 && Math.abs(Dy) < 1e-12) {
+                    return [{ label: 'Infinite Sol', val: 'Infinite' }];
+                } else {
+                    return [{ label: 'No Solution', val: 'No Solution' }];
+                }
+            }
+
+            return [
+                { label: 'X', val: formatEqnNum(Dx / D) },
+                { label: 'Y', val: formatEqnNum(Dy / D) }
+            ];
+        };
+
+        const solveSimultaneous3 = (a1, b1, c1, d1, a2, b2, c2, d2, a3, b3, c3, d3) => {
+            const det3 = (m) => (
+                m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+            );
+
+            const M = [[a1, b1, c1], [a2, b2, c2], [a3, b3, c3]];
+            const D = det3(M);
+
+            if (Math.abs(D) < 1e-12) {
+                return [{ label: 'No Solution', val: 'No Solution' }];
+            }
+
+            const Mx = [[d1, b1, c1], [d2, b2, c2], [d3, b3, c3]];
+            const My = [[a1, d1, c1], [a2, d2, c2], [a3, d3, c3]];
+            const Mz = [[a1, b1, d1], [a2, b2, d2], [a3, b3, d3]];
+
+            return [
+                { label: 'X', val: formatEqnNum(det3(Mx) / D) },
+                { label: 'Y', val: formatEqnNum(det3(My) / D) },
+                { label: 'Z', val: formatEqnNum(det3(Mz) / D) }
+            ];
+        };
+
+        const solveCubic = (a, b, c, d) => {
+            if (Math.abs(a) < 1e-12) {
+                return solveQuadratic(b, c, d);
+            }
+
+            const A = b / a;
+            const B = c / a;
+            const C = d / a;
+
+            const p = B - (A * A) / 3;
+            const q = (2 * A * A * A) / 27 - (A * B) / 3 + C;
+            const delta = (q * q) / 4 + (p * p * p) / 27;
+            const shift = -A / 3;
+
+            if (delta > 1e-12) {
+                const sqrtDelta = Math.sqrt(delta);
+                const u = Math.cbrt(-q / 2 + sqrtDelta);
+                const v = Math.cbrt(-q / 2 - sqrtDelta);
+                const t1 = u + v;
+                const x1 = t1 + shift;
+                const realPart = -(u + v) / 2 + shift;
+                const imagPart = ((u - v) * Math.sqrt(3)) / 2;
+
+                return [
+                    { label: 'X1', val: formatEqnNum(x1) },
+                    { label: 'X2', val: `${formatEqnNum(realPart)}+${formatEqnNum(Math.abs(imagPart))}i` },
+                    { label: 'X3', val: `${formatEqnNum(realPart)}-${formatEqnNum(Math.abs(imagPart))}i` }
+                ];
+            } else if (Math.abs(delta) <= 1e-12) {
+                const u = Math.cbrt(-q / 2);
+                const x1 = 2 * u + shift;
+                const x2 = -u + shift;
+                return [
+                    { label: 'X1', val: formatEqnNum(x1) },
+                    { label: 'X2', val: formatEqnNum(x2) }
+                ];
+            } else {
+                const r = Math.sqrt(- (p * p * p) / 27);
+                const phi = Math.acos(-q / (2 * r));
+                const m = 2 * Math.cbrt(r);
+
+                const x1 = m * Math.cos(phi / 3) + shift;
+                const x2 = m * Math.cos((phi + 2 * Math.PI) / 3) + shift;
+                const x3 = m * Math.cos((phi + 4 * Math.PI) / 3) + shift;
+                const roots = [x1, x2, x3].sort((r1, r2) => r2 - r1);
+
+                return [
+                    { label: 'X1', val: formatEqnNum(roots[0]) },
+                    { label: 'X2', val: formatEqnNum(roots[1]) },
+                    { label: 'X3', val: formatEqnNum(roots[2]) }
+                ];
+            }
+        };
+
         function App() {
           const [isOff, setIsOff] = useState(false);
           const [expression, setExpression] = useState('');
@@ -357,13 +519,24 @@
           const [displayFormat, setDisplayFormat] = useState('Norm'); // Norm, Fix, Sci
           const [calcMode, setCalcMode] = useState('COMP'); // COMP, CMPLX, STAT, etc.
 
+          // EQN Mode State
+          const [eqnState, setEqnState] = useState({
+              type: null, // null, 1 (2x2), 2 (3x3), 3 (quadratic), 4 (cubic)
+              labels: [],
+              coeffs: [],
+              currentIdx: 0,
+              inputVal: '',
+              results: null,
+              resultIdx: 0
+          });
+
           // Modifier Modes
           const [isShift, setIsShift] = useState(false);
           const [isAlpha, setIsAlpha] = useState(false);
           const [stoActive, setStoActive] = useState(false);
           const [rclActive, setRclActive] = useState(false);
 
-          // Active LCD Menu: null, 'MODE', 'SETUP', 'HYP', 'CONST', 'CONV', 'CLR', 'DRG', 'CALC_INPUT'
+          // Active LCD Menu: null, 'MODE', 'SETUP', 'HYP', 'CONST', 'CONV', 'CLR', 'DRG', 'CALC_INPUT', 'EQN_TYPE'
           const [activeMenu, setActiveMenu] = useState(null);
           const [calcVarInput, setCalcVarInput] = useState({ varName: 'X', value: '' });
 
@@ -386,10 +559,13 @@
             if (isOff) {
                 setIsOff(false);
             }
+            if (calcMode === 'EQN' && eqnState.type) {
+                setEqnState(prev => ({ ...prev, inputVal: '', results: null, resultIdx: 0 }));
+                return;
+            }
             setExpression('');
             setCursorPos(0);
             setResult('');
-            setIsResultMode(false);
             setIsShift(false);
             setIsAlpha(false);
             setStoActive(false);
@@ -413,6 +589,18 @@
 
             if (activeMenu) {
                 handleMenuSelect(val);
+                return;
+            }
+
+            // In EQN Mode: typing enters coefficient values
+            if (calcMode === 'EQN' && eqnState.type) {
+                if (eqnState.results) {
+                    // In result view: user can press AC to return to editor
+                    return;
+                }
+                setEqnState(prev => ({ ...prev, inputVal: prev.inputVal + val }));
+                setIsShift(false);
+                setIsAlpha(false);
                 return;
             }
 
@@ -471,6 +659,16 @@
 
           const deleteChar = () => {
             if (isOff || activeMenu) return;
+            if (calcMode === 'EQN' && eqnState.type) {
+                if (eqnState.results) {
+                    setEqnState(prev => ({ ...prev, results: null, inputVal: '' }));
+                    return;
+                }
+                if (eqnState.inputVal.length > 0) {
+                    setEqnState(prev => ({ ...prev, inputVal: prev.inputVal.slice(0, -1) }));
+                }
+                return;
+            }
             if (isResultMode) {
                 setIsResultMode(false);
             }
@@ -500,6 +698,23 @@
 
           const clearAll = () => {
             if (isOff) return;
+            if (activeMenu) {
+                setActiveMenu(null);
+                return;
+            }
+            if (calcMode === 'EQN' && eqnState.type) {
+                if (eqnState.results) {
+                    // Return from results to coefficient editor
+                    setEqnState(prev => ({ ...prev, results: null, inputVal: '', resultIdx: 0 }));
+                    return;
+                }
+                if (eqnState.inputVal) {
+                    setEqnState(prev => ({ ...prev, inputVal: '' }));
+                } else {
+                    setEqnState(prev => ({ ...prev, coeffs: prev.coeffs.map(() => 0), currentIdx: 0, inputVal: '' }));
+                }
+                return;
+            }
             setExpression('');
             setCursorPos(0);
             setResult('');
@@ -515,18 +730,49 @@
           // Cursor Navigation
           const moveCursorLeft = () => {
               if (isOff) return;
+              if (calcMode === 'EQN' && eqnState.type) {
+                  if (!eqnState.results) {
+                      setEqnState(prev => ({ ...prev, currentIdx: Math.max(0, prev.currentIdx - 1), inputVal: '' }));
+                  }
+                  return;
+              }
               if (isResultMode) setIsResultMode(false);
               setCursorPos(prev => Math.max(0, prev - 1));
           };
           const moveCursorRight = () => {
               if (isOff) return;
+              if (calcMode === 'EQN' && eqnState.type) {
+                  if (!eqnState.results) {
+                      setEqnState(prev => ({ ...prev, currentIdx: Math.min(prev.coeffs.length - 1, prev.currentIdx + 1), inputVal: '' }));
+                  }
+                  return;
+              }
               if (isResultMode) setIsResultMode(false);
               setCursorPos(prev => Math.min(expression.length, prev + 1));
           };
 
           // History Navigation (REPLAY Up / Down)
           const navigateHistoryUp = () => {
-              if (isOff || history.length === 0) return;
+              if (isOff) return;
+              if (calcMode === 'EQN' && eqnState.type) {
+                  if (eqnState.results) {
+                      setEqnState(prev => ({
+                          ...prev,
+                          resultIdx: (prev.resultIdx - 1 + prev.results.length) % prev.results.length
+                      }));
+                  } else {
+                      setEqnState(prev => {
+                          const step = prev.type === 1 ? 3 : prev.type === 2 ? 4 : 1;
+                          return {
+                              ...prev,
+                              currentIdx: Math.max(0, prev.currentIdx - step),
+                              inputVal: ''
+                          };
+                      });
+                  }
+                  return;
+              }
+              if (history.length === 0) return;
               const nextIdx = historyIdx < history.length - 1 ? historyIdx + 1 : historyIdx;
               setHistoryIdx(nextIdx);
               setExpression(history[nextIdx].expression);
@@ -536,7 +782,26 @@
           };
 
           const navigateHistoryDown = () => {
-              if (isOff || history.length === 0) return;
+              if (isOff) return;
+              if (calcMode === 'EQN' && eqnState.type) {
+                  if (eqnState.results) {
+                      setEqnState(prev => ({
+                          ...prev,
+                          resultIdx: (prev.resultIdx + 1) % prev.results.length
+                      }));
+                  } else {
+                      setEqnState(prev => {
+                          const step = prev.type === 1 ? 3 : prev.type === 2 ? 4 : 1;
+                          return {
+                              ...prev,
+                              currentIdx: Math.min(prev.coeffs.length - 1, prev.currentIdx + step),
+                              inputVal: ''
+                          };
+                      });
+                  }
+                  return;
+              }
+              if (history.length === 0) return;
               if (historyIdx > 0) {
                   const nextIdx = historyIdx - 1;
                   setHistoryIdx(nextIdx);
@@ -555,10 +820,71 @@
 
           // Standard to Decimal S<=>D (Toggles Decimal <-> Stacked Fraction)
           const handleSD = (isMixed = false) => {
-              if (isOff || !result || result === 'Error') return;
+              if (isOff) return;
+              if (calcMode === 'EQN' && eqnState.type && eqnState.results) {
+                  const cur = eqnState.results[eqnState.resultIdx];
+                  const toggled = convertToSD(cur.val, isMixed);
+                  setEqnState(prev => {
+                      const nextRes = [...prev.results];
+                      nextRes[prev.resultIdx] = { ...cur, val: toggled };
+                      return { ...prev, results: nextRes };
+                  });
+                  return;
+              }
+              if (!result || result === 'Error') return;
               const newRes = convertToSD(result, isMixed);
               setResult(newRes);
               setAnsDisplay(newRes);
+          };
+
+          // EQN Mode Solver Execution
+          const handleEqnEquals = () => {
+              if (eqnState.results) {
+                  // Cycle through results
+                  setEqnState(prev => ({
+                      ...prev,
+                      resultIdx: (prev.resultIdx + 1) % prev.results.length
+                  }));
+                  return;
+              }
+
+              // In Coefficient Editor
+              let currentVal = eqnState.coeffs[eqnState.currentIdx];
+              if (eqnState.inputVal.trim() !== '') {
+                  const evaluated = evaluateMath(eqnState.inputVal, false);
+                  currentVal = (typeof evaluated === 'number' && !isNaN(evaluated)) ? evaluated : 0;
+              }
+
+              const newCoeffs = [...eqnState.coeffs];
+              newCoeffs[eqnState.currentIdx] = currentVal;
+
+              // Check if ready to solve
+              if (eqnState.currentIdx === eqnState.coeffs.length - 1) {
+                  let solved = [];
+                  if (eqnState.type === 1) {
+                      solved = solveSimultaneous2(...newCoeffs);
+                  } else if (eqnState.type === 2) {
+                      solved = solveSimultaneous3(...newCoeffs);
+                  } else if (eqnState.type === 3) {
+                      solved = solveQuadratic(...newCoeffs);
+                  } else if (eqnState.type === 4) {
+                      solved = solveCubic(...newCoeffs);
+                  }
+                  setEqnState(prev => ({
+                      ...prev,
+                      coeffs: newCoeffs,
+                      inputVal: '',
+                      results: solved,
+                      resultIdx: 0
+                  }));
+              } else {
+                  setEqnState(prev => ({
+                      ...prev,
+                      coeffs: newCoeffs,
+                      currentIdx: prev.currentIdx + 1,
+                      inputVal: ''
+                  }));
+              }
           };
 
           // Degrees / Minutes / Seconds Conversion (DMS Key)
@@ -1057,17 +1383,77 @@
           const handleMenuSelect = (choice) => {
               if (activeMenu === 'MODE') {
                   switch(choice) {
-                      case '1': setCalcMode('COMP'); break;
-                      case '2': setCalcMode('CMPLX'); break;
-                      case '3': setCalcMode('STAT'); break;
-                      case '4': setCalcMode('BASE-N'); break;
-                      case '5': setCalcMode('EQN'); break;
-                      case '6': setCalcMode('MATRIX'); break;
-                      case '7': setCalcMode('TABLE'); break;
-                      case '8': setCalcMode('VECTOR'); break;
-                      default: break;
+                      case '1':
+                          setCalcMode('COMP');
+                          setEqnState({ type: null, labels: [], coeffs: [], currentIdx: 0, inputVal: '', results: null, resultIdx: 0 });
+                          setActiveMenu(null);
+                          break;
+                      case '2': setCalcMode('CMPLX'); setActiveMenu(null); break;
+                      case '3': setCalcMode('STAT'); setActiveMenu(null); break;
+                      case '4': setCalcMode('BASE-N'); setActiveMenu(null); break;
+                      case '5':
+                          setCalcMode('EQN');
+                          setActiveMenu('EQN_TYPE');
+                          break;
+                      case '6': setCalcMode('MATRIX'); setActiveMenu(null); break;
+                      case '7': setCalcMode('TABLE'); setActiveMenu(null); break;
+                      case '8': setCalcMode('VECTOR'); setActiveMenu(null); break;
+                      default: setActiveMenu(null); break;
                   }
-                  setActiveMenu(null);
+              } else if (activeMenu === 'EQN_TYPE') {
+                  switch(choice) {
+                      case '1':
+                          setEqnState({
+                              type: 1,
+                              labels: ['a1', 'b1', 'c1', 'a2', 'b2', 'c2'],
+                              coeffs: [0, 0, 0, 0, 0, 0],
+                              currentIdx: 0,
+                              inputVal: '',
+                              results: null,
+                              resultIdx: 0
+                          });
+                          setActiveMenu(null);
+                          break;
+                      case '2':
+                          setEqnState({
+                              type: 2,
+                              labels: ['a1', 'b1', 'c1', 'd1', 'a2', 'b2', 'c2', 'd2', 'a3', 'b3', 'c3', 'd3'],
+                              coeffs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                              currentIdx: 0,
+                              inputVal: '',
+                              results: null,
+                              resultIdx: 0
+                          });
+                          setActiveMenu(null);
+                          break;
+                      case '3':
+                          setEqnState({
+                              type: 3,
+                              labels: ['a', 'b', 'c'],
+                              coeffs: [0, 0, 0],
+                              currentIdx: 0,
+                              inputVal: '',
+                              results: null,
+                              resultIdx: 0
+                          });
+                          setActiveMenu(null);
+                          break;
+                      case '4':
+                          setEqnState({
+                              type: 4,
+                              labels: ['a', 'b', 'c', 'd'],
+                              coeffs: [0, 0, 0, 0],
+                              currentIdx: 0,
+                              inputVal: '',
+                              results: null,
+                              resultIdx: 0
+                          });
+                          setActiveMenu(null);
+                          break;
+                      default:
+                          setActiveMenu(null);
+                          break;
+                  }
               } else if (activeMenu === 'SETUP') {
                   switch(choice) {
                       case '1': break; // MthIO
@@ -1155,6 +1541,90 @@
               }
           };
 
+          const renderEqnEditor = () => {
+              const type = eqnState.type;
+              let cols = ['a', 'b', 'c'];
+              let numRows = 1;
+              let numCols = 3;
+              if (type === 1) {
+                  cols = ['a', 'b', 'c'];
+                  numRows = 2;
+                  numCols = 3;
+              } else if (type === 2) {
+                  cols = ['a', 'b', 'c', 'd'];
+                  numRows = 3;
+                  numCols = 4;
+              } else if (type === 3) {
+                  cols = ['a', 'b', 'c'];
+                  numRows = 1;
+                  numCols = 3;
+              } else if (type === 4) {
+                  cols = ['a', 'b', 'c', 'd'];
+                  numRows = 1;
+                  numCols = 4;
+              }
+
+              const curIdx = eqnState.currentIdx;
+              const curRow = Math.floor(curIdx / numCols);
+
+              return (
+                  <div className="flex flex-col h-full justify-between select-none pt-0.5">
+                      {/* Table Header and Cells */}
+                      <div className="w-full">
+                          <div className={`grid ${numCols === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 text-center font-bold`}>
+                              {cols.map((colName, cIdx) => {
+                                  const cellIdx = curRow * numCols + cIdx;
+                                  const isSelected = curIdx === cellIdx;
+                                  const cellVal = eqnState.coeffs[cellIdx];
+                                  const displayVal = isSelected && eqnState.inputVal !== '' ? eqnState.inputVal : cellVal;
+                                  return (
+                                      <div 
+                                          key={cIdx} 
+                                          onClick={() => setEqnState(prev => ({ ...prev, currentIdx: cellIdx, inputVal: '' }))}
+                                          className={`rounded px-1 py-0.5 cursor-pointer transition-colors ${
+                                              isSelected 
+                                                  ? 'bg-[#14532d] text-[#eef8dd] shadow-sm' 
+                                                  : 'bg-[#14532d]/10 text-[#14532d]'
+                                          }`}
+                                      >
+                                          <div className="text-[8px] opacity-75">{type <= 2 ? `${colName}${curRow + 1}` : colName}</div>
+                                          <div className="text-[10px] font-mono truncate">{displayVal !== undefined ? displayVal : 0}</div>
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                          {type <= 2 && (
+                              <div className="flex justify-between items-center mt-1 px-0.5">
+                                  <span className="text-[8px] text-[#14532d]/60">Eq {curRow + 1} of {numRows}</span>
+                                  <div className="flex gap-1">
+                                      {Array.from({ length: numRows }, (_, r) => (
+                                          <button
+                                              key={r}
+                                              onClick={() => setEqnState(prev => ({ ...prev, currentIdx: r * numCols + (prev.currentIdx % numCols), inputVal: '' }))}
+                                              className={`text-[8px] px-1 rounded ${curRow === r ? 'bg-[#14532d] text-white font-bold' : 'bg-[#14532d]/15 text-[#14532d]'}`}
+                                          >
+                                              Eq {r + 1}
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+
+                      {/* Prompt input row */}
+                      <div className="border-t border-[#14532d]/20 pt-1 flex items-center justify-between text-[#14532d]">
+                          <span className="text-xs font-bold font-mono">
+                              {eqnState.labels[curIdx] || 'a'} =
+                          </span>
+                          <span className="text-sm font-bold font-mono tracking-wider">
+                              {eqnState.inputVal !== '' ? eqnState.inputVal : (eqnState.coeffs[curIdx] ?? 0)}
+                              <span className="cursor-blink"></span>
+                          </span>
+                      </div>
+                  </div>
+              );
+          };
+
           return (
             <div className="min-h-screen bg-gradient-to-br from-[#1a4023] via-[#365E32] to-[#7AC143] flex items-center justify-center p-2 font-sans select-none">
               
@@ -1213,7 +1683,7 @@
                             <div className="flex gap-1.5 items-center">
                                {calcMode !== 'COMP' && <span className="text-black bg-black/5 px-1 rounded-sm">{calcMode}</span>}
                                <span className="text-[#14532d] text-[8px] font-bold">Math</span>
-                               <span className="text-[7px] text-[#14532d]">{history.length > 0 ? "▲▼" : ""}</span>
+                               <span className="text-[7px] text-[#14532d]">{(calcMode === 'EQN' && eqnState.type && eqnState.results && eqnState.results.length > 1) ? "▲▼" : (history.length > 0 ? "▲▼" : "")}</span>
                             </div>
                         </div>
 
@@ -1277,6 +1747,30 @@
                                 <div>X? {calcVarInput.value}<span className="cursor-blink"></span></div>
                                 <div className="text-[9px] opacity-75">Enter value on keypad & press [=]</div>
                             </div>
+                        ) : activeMenu === 'EQN_TYPE' ? (
+                            <div className="absolute inset-x-2 top-6 bottom-1 bg-[#eef8dd] z-20 text-[#14532d] text-[10px] font-bold p-1 flex flex-col justify-between">
+                                <div className="border-b border-[#14532d]/20 pb-0.5 mb-0.5">Select EQN Type [1-4]:</div>
+                                <div className="text-[9px] leading-tight">1: a<span className="text-[7px]">n</span>X + b<span className="text-[7px]">n</span>Y = c<span className="text-[7px]">n</span></div>
+                                <div className="text-[9px] leading-tight">2: a<span className="text-[7px]">n</span>X + b<span className="text-[7px]">n</span>Y + c<span className="text-[7px]">n</span>Z = d<span className="text-[7px]">n</span></div>
+                                <div className="text-[9px] leading-tight">3: aX² + bX + c = 0</div>
+                                <div className="text-[9px] leading-tight">4: aX³ + bX² + cX + d = 0</div>
+                            </div>
+                        ) : (calcMode === 'EQN' && eqnState.type) ? (
+                            eqnState.results ? (
+                                <div className="flex flex-col h-full justify-between select-none">
+                                    <div className="text-xs font-bold text-[#14532d] flex justify-between items-center">
+                                        <span>{eqnState.results[eqnState.resultIdx]?.label || 'X'} =</span>
+                                        <span className="text-[9px] opacity-75 font-normal">
+                                            {eqnState.resultIdx + 1}/{eqnState.results.length}
+                                        </span>
+                                    </div>
+                                    <div className="text-right text-2xl text-[#14532d] font-bold tracking-widest overflow-hidden mt-auto flex items-center justify-end">
+                                        {renderResultDisplay(eqnState.results[eqnState.resultIdx]?.val || '0')}
+                                    </div>
+                                </div>
+                            ) : (
+                                renderEqnEditor()
+                            )
                         ) : (
                             <>
                                 {/* Expression Line with Cursor */}
@@ -1817,6 +2311,8 @@
                                     setVariables(prev => ({ ...prev, [calcVarInput.varName]: val }));
                                     setActiveMenu(null);
                                     handleEvaluate();
+                                } else if (calcMode === 'EQN' && eqnState.type) {
+                                    handleEqnEquals();
                                 } else {
                                     handleEvaluate();
                                 }
