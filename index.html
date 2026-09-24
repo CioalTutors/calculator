@@ -341,6 +341,7 @@
           const [expression, setExpression] = useState('');
           const [cursorPos, setCursorPos] = useState(0);
           const [result, setResult] = useState('');
+          const [isResultMode, setIsResultMode] = useState(false); // True when a calculated result is showing
           const [history, setHistory] = useState([]);
           const [historyIdx, setHistoryIdx] = useState(-1);
           
@@ -349,6 +350,7 @@
               A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0
           });
           const [ansValue, setAnsValue] = useState(0);
+          const [ansDisplay, setAnsDisplay] = useState('0');
 
           // Settings State
           const [angleMode, setAngleMode] = useState('D'); // D (Deg), R (Rad), G (Gra)
@@ -387,6 +389,7 @@
             setExpression('');
             setCursorPos(0);
             setResult('');
+            setIsResultMode(false);
             setIsShift(false);
             setIsAlpha(false);
             setStoActive(false);
@@ -404,7 +407,7 @@
               setActiveMenu(null);
           };
 
-          // Character Insertion at Cursor
+          // Character Insertion at Cursor with Robust Result State Machine
           const insert = (val) => {
             if (isOff) return;
 
@@ -413,17 +416,48 @@
                 return;
             }
 
-            // If a result is showing and an operator is entered, chain calculation
-            if (result && result !== 'Error' && ['+', '-', '×', '÷', '^', 'P', 'C'].includes(val)) {
-                const newExp = 'Ans' + val;
+            // When a calculation result is currently showing:
+            if (isResultMode) {
+                setIsResultMode(false);
+                if (['+', '-', '×', '÷', '^', 'P', 'C'].includes(val)) {
+                    // Operator chain: begins calculation with previous answer: Ans + ...
+                    const newExp = 'Ans' + val;
+                    setExpression(newExp);
+                    setCursorPos(newExp.length);
+                    // keep previous answer visible on display!
+                    setResult(ansDisplay || ansValue.toString());
+                    setIsShift(false);
+                    setIsAlpha(false);
+                    return;
+                } else if (val === 'Ans') {
+                    // Ans button pressed after calculation: sets expression to Ans and keeps answer visible!
+                    setExpression('Ans');
+                    setCursorPos(3);
+                    setResult(ansDisplay || ansValue.toString());
+                    setIsShift(false);
+                    setIsAlpha(false);
+                    return;
+                } else {
+                    // User starts typing a fresh new number or function:
+                    setExpression(val);
+                    setCursorPos(val.length);
+                    setResult('');
+                    setIsShift(false);
+                    setIsAlpha(false);
+                    return;
+                }
+            }
+
+            // Special case: Ans pressed when not in result mode
+            if (val === 'Ans') {
+                const newExp = expression.slice(0, cursorPos) + 'Ans' + expression.slice(cursorPos);
                 setExpression(newExp);
-                setCursorPos(newExp.length);
-                setResult('');
-                return;
-            } else if (result && result !== 'Error' && !['+', '-', '×', '÷', '^'].includes(val)) {
-                setResult('');
-                setExpression(val);
-                setCursorPos(val.length);
+                setCursorPos(prev => prev + 3);
+                if (!expression) {
+                    setResult(ansDisplay || '0');
+                }
+                setIsShift(false);
+                setIsAlpha(false);
                 return;
             }
 
@@ -437,10 +471,20 @@
 
           const deleteChar = () => {
             if (isOff || activeMenu) return;
+            if (isResultMode) {
+                setIsResultMode(false);
+            }
             if (cursorPos > 0) {
-                const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
-                setExpression(newExp);
-                setCursorPos(prev => prev - 1);
+                // If deleting 'Ans' (3 chars)
+                if (expression.slice(cursorPos - 3, cursorPos) === 'Ans') {
+                    const newExp = expression.slice(0, cursorPos - 3) + expression.slice(cursorPos);
+                    setExpression(newExp);
+                    setCursorPos(prev => prev - 3);
+                } else {
+                    const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
+                    setExpression(newExp);
+                    setCursorPos(prev => prev - 1);
+                }
             }
           };
 
@@ -449,20 +493,24 @@
             setExpression('');
             setCursorPos(0);
             setResult('');
+            setIsResultMode(false);
             setIsShift(false);
             setIsAlpha(false);
             setStoActive(false);
             setRclActive(false);
             setActiveMenu(null);
+            // Note: ansValue and ansDisplay are preserved across AC, matching Casio fx-991ES!
           };
 
           // Cursor Navigation
           const moveCursorLeft = () => {
               if (isOff) return;
+              if (isResultMode) setIsResultMode(false);
               setCursorPos(prev => Math.max(0, prev - 1));
           };
           const moveCursorRight = () => {
               if (isOff) return;
+              if (isResultMode) setIsResultMode(false);
               setCursorPos(prev => Math.min(expression.length, prev + 1));
           };
 
@@ -474,6 +522,7 @@
               setExpression(history[nextIdx].expression);
               setCursorPos(history[nextIdx].expression.length);
               setResult(history[nextIdx].result);
+              setIsResultMode(true);
           };
 
           const navigateHistoryDown = () => {
@@ -484,19 +533,22 @@
                   setExpression(history[nextIdx].expression);
                   setCursorPos(history[nextIdx].expression.length);
                   setResult(history[nextIdx].result);
+                  setIsResultMode(true);
               } else if (historyIdx === 0) {
                   setHistoryIdx(-1);
                   setExpression('');
                   setCursorPos(0);
                   setResult('');
+                  setIsResultMode(false);
               }
           };
 
-          // Standard to Decimal S<=>D
+          // Standard to Decimal S<=>D (Toggles Decimal <-> Stacked Fraction)
           const handleSD = (isMixed = false) => {
               if (isOff || !result || result === 'Error') return;
               const newRes = convertToSD(result, isMixed);
               setResult(newRes);
+              setAnsDisplay(newRes);
           };
 
           // Degrees / Minutes / Seconds Conversion (DMS Key)
@@ -505,10 +557,14 @@
               if (result && result !== 'Error') {
                   if (result.includes('°')) {
                       // Already DMS: toggle to decimal degrees
-                      setResult(convertToSD(result));
+                      const dec = convertToSD(result);
+                      setResult(dec);
+                      setAnsDisplay(dec);
                   } else {
                       // Decimal: convert to DMS
-                      setResult(toDMS(result));
+                      const dms = toDMS(result);
+                      setResult(dms);
+                      setAnsDisplay(dms);
                   }
               } else {
                   insert('°');
@@ -525,13 +581,15 @@
               let engExp = Math.floor(exp / 3) * 3;
               if (isReverse) engExp += 3;
               const mantissa = num / Math.pow(10, engExp);
-              setResult(`${parseFloat(mantissa.toPrecision(7))}×10^${engExp}`);
+              const formatted = `${parseFloat(mantissa.toPrecision(7))}×10^${engExp}`;
+              setResult(formatted);
+              setAnsDisplay(formatted);
           };
 
           // Variable Store (STO) & Recall (RCL)
           const handleVariableKey = (varName) => {
               if (stoActive) {
-                  const val = result && !isNaN(parseFloat(result)) ? parseFloat(result) : ansValue;
+                  const val = ansValue;
                   setVariables(prev => ({ ...prev, [varName]: val }));
                   setResult(`${val} ➔ ${varName}`);
                   setStoActive(false);
@@ -549,7 +607,7 @@
           const handleMemoryAdd = (subtract = false) => {
               if (isOff) return;
               try {
-                  const val = result && !isNaN(parseFloat(result)) ? parseFloat(result) : (evaluateMath(expression) || 0);
+                  const val = ansValue;
                   const multiplier = subtract ? -1 : 1;
                   const newM = variables.M + (val * multiplier);
                   setVariables(prev => ({ ...prev, M: newM }));
@@ -589,9 +647,18 @@
                       exp = exp.replace(new RegExp(`\\b${vKey}\\b`, 'g'), `(${vVal})`);
                   }
               }
+
+              // 2. Implicit Multiplications with Ans & replace Ans with numeric ansValue
+              exp = exp
+                  .replace(/(\d)Ans/g, '$1*Ans')
+                  .replace(/Ans(\d)/g, 'Ans*$1')
+                  .replace(/(\))Ans/g, '$1*Ans')
+                  .replace(/Ans\(/g, 'Ans*(')
+                  .replace(/AnsAns/g, 'Ans*Ans');
+
               exp = exp.replace(/\bAns\b/g, `(${ansValue})`);
 
-              // 2. Numerical Integration: ∫(expr, a, b)
+              // 3. Numerical Integration: ∫(expr, a, b)
               const integralRegex = /∫\(([^,]+),([^,]+),([^)]+)\)/;
               let matchInt = exp.match(integralRegex);
               let intSafety = 0;
@@ -614,7 +681,7 @@
                   intSafety++;
               }
 
-              // 3. Numerical Differentiation: d/dx(expr, a)
+              // 4. Numerical Differentiation: d/dx(expr, a)
               const diffRegex = /d\/dx\(([^,]+),([^)]+)\)/;
               let matchDiff = exp.match(diffRegex);
               let diffSafety = 0;
@@ -630,7 +697,7 @@
                   diffSafety++;
               }
 
-              // 4. Summation: Σ(expr, start, end)
+              // 5. Summation: Σ(expr, start, end)
               const sumRegex = /Σ\(([^,]+),([^,]+),([^)]+)\)/;
               let matchSum = exp.match(sumRegex);
               let sumSafety = 0;
@@ -647,7 +714,7 @@
                   sumSafety++;
               }
 
-              // 5. Pol(x, y) and Rec(r, θ)
+              // 6. Pol(x, y) and Rec(r, θ)
               const polRegex = /Pol\(([^,]+),([^)]+)\)/;
               const matchPol = exp.match(polRegex);
               if (matchPol) {
@@ -675,7 +742,7 @@
                   return `x=${parseFloat(rx.toPrecision(8))}, y=${parseFloat(ry.toPrecision(8))}`;
               }
 
-              // 6. Base-N Log: log_b(base, val)
+              // 7. Base-N Log: log_b(base, val)
               const logBaseRegex = /log_b\(([^,]+),([^)]+)\)/;
               let matchLogB = exp.match(logBaseRegex);
               while (matchLogB) {
@@ -686,7 +753,7 @@
                   matchLogB = exp.match(logBaseRegex);
               }
 
-              // 7. Factorial & Permutation/Combination
+              // 8. Factorial & Permutation/Combination
               const factLib = `
                 function fact(n) {
                   if (n < 0 || Math.floor(n) !== n) return NaN;
@@ -716,10 +783,10 @@
               exp = exp.replace(new RegExp(`${atom}P${atom}`, 'g'), 'nPr($1, $2)');
               exp = exp.replace(new RegExp(`${atom}C${atom}`, 'g'), 'nCr($1, $2)');
 
-              // 8. Robust DMS Parsing
+              // 9. Robust DMS Parsing
               exp = parseDMS(exp, angleMode);
 
-              // 9. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
+              // 10. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
               exp = exp
                 .replace(/(\d)(\()/g, '$1*$2')
                 .replace(/(\))(\d)/g, '$1*$2')
@@ -731,7 +798,7 @@
               // If X is still in exp, substitute with variables.X
               exp = exp.replace(/\bX\b/g, `(${variables.X || 0})`);
 
-              // 10. Standard Math Replacements
+              // 11. Standard Math Replacements
               exp = exp
                 .replace(/×/g, '*')
                 .replace(/÷/g, '/')
@@ -744,7 +811,7 @@
                 .replace(/Ran#/g, '(Math.floor(Math.random()*1000)/1000)')
                 .replace(/RanInt#\(/g, 'RanInt(');
 
-              // 11. Hyperbolic functions
+              // 12. Hyperbolic functions
               exp = exp
                 .replace(/asinh\(/g, 'Math.asinh(')
                 .replace(/acosh\(/g, 'Math.acosh(')
@@ -753,12 +820,12 @@
                 .replace(/cosh\(/g, 'Math.cosh(')
                 .replace(/tanh\(/g, 'Math.tanh(');
 
-              // 12. Logarithms
+              // 13. Logarithms
               exp = exp
                 .replace(/log\(/g, 'Math.log10(')
                 .replace(/ln\(/g, 'Math.log(');
 
-              // 13. Trigonometry Angle Modes
+              // 14. Trigonometry Angle Modes
               exp = exp.replace(/asin\(/g, 'TR_ASIN(');
               exp = exp.replace(/acos\(/g, 'TR_ACOS(');
               exp = exp.replace(/atan\(/g, 'TR_ATAN(');
@@ -802,7 +869,8 @@
               if (typeof res === 'string') return res;
               if (isNaN(res) || !isFinite(res)) return 'Error';
 
-              // Format Output
+              // BY DEFAULT: DISPLAY AS DECIMAL (NOT FRACTION)
+              // User can press S<=>D anytime to convert to stacked fraction!
               let outStr = '';
               if (displayFormat === 'Fix') {
                   outStr = res.toFixed(4);
@@ -810,8 +878,6 @@
                   outStr = res.toExponential(4);
               } else {
                   outStr = parseFloat(res.toPrecision(10)).toString();
-                  const sdVal = convertToSD(outStr);
-                  if (sdVal !== outStr) outStr = sdVal;
               }
 
               return outStr;
@@ -840,18 +906,23 @@
               if (cleanExp.includes(':')) {
                   const statements = cleanExp.split(':');
                   let lastRes = '';
+                  let lastRaw = 0;
                   for (const stmt of statements) {
                       if (stmt.trim()) {
-                          lastRes = evaluateMath(stmt);
+                          lastRaw = evaluateMath(stmt, false);
+                          lastRes = evaluateMath(stmt, true);
                       }
                   }
                   if (hasDMS && lastRes !== 'Error' && !isNaN(parseFloat(lastRes))) {
                       lastRes = toDMS(lastRes);
                   }
                   setResult(lastRes);
+                  setIsResultMode(true);
                   if (lastRes !== 'Error') {
-                      const num = parseFloat(lastRes);
-                      if (!isNaN(num)) setAnsValue(num);
+                      if (typeof lastRaw === 'number' && !isNaN(lastRaw) && isFinite(lastRaw)) {
+                          setAnsValue(lastRaw);
+                      }
+                      setAnsDisplay(lastRes);
                       setHistory(prev => [{ expression: cleanExp, result: lastRes }, ...prev]);
                       setHistoryIdx(-1);
                   }
@@ -859,19 +930,24 @@
               }
 
               try {
-                  let finalRes = evaluateMath(cleanExp);
+                  const rawVal = evaluateMath(cleanExp, false);
+                  let finalRes = evaluateMath(cleanExp, true);
                   if (hasDMS && finalRes !== 'Error' && !isNaN(parseFloat(finalRes))) {
                       finalRes = toDMS(finalRes);
                   }
                   setResult(finalRes);
+                  setIsResultMode(true);
                   if (finalRes !== 'Error') {
-                      const num = parseFloat(finalRes);
-                      if (!isNaN(num)) setAnsValue(num);
+                      if (typeof rawVal === 'number' && !isNaN(rawVal) && isFinite(rawVal)) {
+                          setAnsValue(rawVal);
+                      }
+                      setAnsDisplay(finalRes);
                       setHistory(prev => [{ expression: cleanExp, result: finalRes }, ...prev]);
                       setHistoryIdx(-1);
                   }
               } catch (e) {
                   setResult('Error');
+                  setIsResultMode(true);
               }
               setIsShift(false);
               setIsAlpha(false);
@@ -917,9 +993,14 @@
                   const residual = parseFloat((leftVal - rightVal).toPrecision(4));
 
                   setVariables(prev => ({ ...prev, X: rootVal }));
-                  setResult(`X=${rootVal} (L-R=${residual})`);
+                  setAnsValue(rootVal);
+                  const solveStr = `X=${rootVal} (L-R=${residual})`;
+                  setResult(solveStr);
+                  setAnsDisplay(rootVal.toString());
+                  setIsResultMode(true);
               } catch (e) {
                   setResult('Error');
+                  setIsResultMode(true);
               }
               setIsShift(false);
           };
@@ -986,7 +1067,10 @@
                   const convObj = CONVERSIONS.find(c => c.code === choice);
                   if (convObj) {
                       if (convObj.custom && result && !isNaN(parseFloat(result))) {
-                          setResult(convObj.custom(parseFloat(result)).toString());
+                          const convRes = convObj.custom(parseFloat(result)).toString();
+                          setResult(convRes);
+                          setAnsDisplay(convRes);
+                          setAnsValue(parseFloat(convRes) || 0);
                       } else if (convObj.factor) {
                           insert(`*${convObj.factor}`);
                       }
@@ -1001,6 +1085,7 @@
                   } else if (choice === '2') {
                       setVariables({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0 });
                       setAnsValue(0);
+                      setAnsDisplay('0');
                       setResult('Reset Memory');
                   } else if (choice === '3') {
                       setAngleMode('D');
@@ -1008,6 +1093,7 @@
                       setCalcMode('COMP');
                       setVariables({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0 });
                       setAnsValue(0);
+                      setAnsDisplay('0');
                       setExpression('');
                       setResult('Reset All');
                   }
@@ -1015,16 +1101,20 @@
               } else if (activeMenu === 'DRG') {
                   if (result && !isNaN(parseFloat(result))) {
                       const val = parseFloat(result);
+                      let newAng = val;
                       if (choice === '1') {
-                          if (angleMode === 'R') setResult((val * 180 / Math.PI).toString());
-                          if (angleMode === 'G') setResult((val * 180 / 200).toString());
+                          if (angleMode === 'R') newAng = val * 180 / Math.PI;
+                          if (angleMode === 'G') newAng = val * 180 / 200;
                       } else if (choice === '2') {
-                          if (angleMode === 'D') setResult((val * Math.PI / 180).toString());
-                          if (angleMode === 'G') setResult((val * Math.PI / 200).toString());
+                          if (angleMode === 'D') newAng = val * Math.PI / 180;
+                          if (angleMode === 'G') newAng = val * Math.PI / 200;
                       } else if (choice === '3') {
-                          if (angleMode === 'D') setResult((val * 200 / 180).toString());
-                          if (angleMode === 'R') setResult((val * 200 / Math.PI).toString());
+                          if (angleMode === 'D') newAng = val * 200 / 180;
+                          if (angleMode === 'R') newAng = val * 200 / Math.PI;
                       }
+                      setResult(newAng.toString());
+                      setAnsDisplay(newAng.toString());
+                      setAnsValue(newAng);
                   }
                   setActiveMenu(null);
               }
