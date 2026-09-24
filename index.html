@@ -475,16 +475,26 @@
                 setIsResultMode(false);
             }
             if (cursorPos > 0) {
-                // If deleting 'Ans' (3 chars)
-                if (expression.slice(cursorPos - 3, cursorPos) === 'Ans') {
-                    const newExp = expression.slice(0, cursorPos - 3) + expression.slice(cursorPos);
-                    setExpression(newExp);
-                    setCursorPos(prev => prev - 3);
-                } else {
-                    const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
-                    setExpression(newExp);
-                    setCursorPos(prev => prev - 1);
+                // Multi-character function tokens to delete cleanly in one press
+                const multiTokens = [
+                    'RanInt#(', 'sinh⁻¹(', 'cosh⁻¹(', 'tanh⁻¹(', 'sinh^-1(', 'cosh^-1(', 'tanh^-1(',
+                    'sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(', 'sin^-1(', 'cos^-1(', 'tan^-1(',
+                    'asinh(', 'acosh(', 'atanh(', 'asin(', 'acos(', 'atan(',
+                    'sinh(', 'cosh(', 'tanh(', 'sin(', 'cos(', 'tan(',
+                    'log_b(', 'log_(', 'log(', 'ln(', 'Ran#', 'Ans', '10^(', 'e^(',
+                    '^(-1)', '^(1/', '³√(', '√(', 'd/dx(', 'Pol(', 'Rec(', 'Σ('
+                ];
+                for (const tok of multiTokens) {
+                    if (cursorPos >= tok.length && expression.slice(cursorPos - tok.length, cursorPos) === tok) {
+                        const newExp = expression.slice(0, cursorPos - tok.length) + expression.slice(cursorPos);
+                        setExpression(newExp);
+                        setCursorPos(prev => prev - tok.length);
+                        return;
+                    }
                 }
+                const newExp = expression.slice(0, cursorPos - 1) + expression.slice(cursorPos);
+                setExpression(newExp);
+                setCursorPos(prev => prev - 1);
             }
           };
 
@@ -742,15 +752,30 @@
                   return `x=${parseFloat(rx.toPrecision(8))}, y=${parseFloat(ry.toPrecision(8))}`;
               }
 
-              // 7. Base-N Log: log_b(base, val)
-              const logBaseRegex = /log_b\(([^,]+),([^)]+)\)/;
-              let matchLogB = exp.match(logBaseRegex);
-              while (matchLogB) {
+              // 7. Base-N Log: log(base, val), log_b(base, val), log_(base, val), log_b(val)
+              const log2ArgRegex = /log(?:_b|_)?\(([^,]+),([^)]+)\)/;
+              let matchLogB = exp.match(log2ArgRegex);
+              let logSafety = 0;
+              while (matchLogB && logSafety < 10) {
                   const base = evaluateMath(matchLogB[1], false);
                   const val = evaluateMath(matchLogB[2], false);
                   const res = Math.log(val) / Math.log(base);
                   exp = exp.replace(matchLogB[0], `(${res})`);
-                  matchLogB = exp.match(logBaseRegex);
+                  matchLogB = exp.match(log2ArgRegex);
+                  logSafety++;
+              }
+
+              // Handle base prefix: log_2(8), log_10(100)
+              const logBasePrefixRegex = /log_(\d+(?:\.\d+)?)\(([^)]+)\)/;
+              let matchLogPrefix = exp.match(logBasePrefixRegex);
+              let logPSafety = 0;
+              while (matchLogPrefix && logPSafety < 10) {
+                  const base = parseFloat(matchLogPrefix[1]);
+                  const val = evaluateMath(matchLogPrefix[2], false);
+                  const res = Math.log(val) / Math.log(base);
+                  exp = exp.replace(matchLogPrefix[0], `(${res})`);
+                  matchLogPrefix = exp.match(logBasePrefixRegex);
+                  logPSafety++;
               }
 
               // 8. Factorial & Permutation/Combination
@@ -786,19 +811,33 @@
               // 9. Robust DMS Parsing
               exp = parseDMS(exp, angleMode);
 
-              // 10. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30))
+              // 10. Normalize Inverse Trigonometry and Hyperbolics (Handles sin⁻¹, sin^-1, asin)
+              exp = exp
+                .replace(/(?:sinh⁻¹|sinh\^-1|sinh\*\*-1|asinh)\(/g, 'HYP_ASINH(')
+                .replace(/(?:cosh⁻¹|cosh\^-1|cosh\*\*-1|acosh)\(/g, 'HYP_ACOSH(')
+                .replace(/(?:tanh⁻¹|tanh\^-1|tanh\*\*-1|atanh)\(/g, 'HYP_ATANH(')
+                .replace(/sinh\(/g, 'HYP_SINH(')
+                .replace(/cosh\(/g, 'HYP_COSH(')
+                .replace(/tanh\(/g, 'HYP_TANH(')
+                .replace(/(?:sin⁻¹|sin\^-1|sin\*\*-1|asin)\(/g, 'TR_ASIN(')
+                .replace(/(?:cos⁻¹|cos\^-1|cos\*\*-1|acos)\(/g, 'TR_ACOS(')
+                .replace(/(?:tan⁻¹|tan\^-1|tan\*\*-1|atan)\(/g, 'TR_ATAN(');
+
+              // 11. Implicit Multiplications (e.g. 2(3), 2π, 2sin(30), 2TR_ATAN(1))
               exp = exp
                 .replace(/(\d)(\()/g, '$1*$2')
                 .replace(/(\))(\d)/g, '$1*$2')
                 .replace(/(\))(\()/g, '$1*$2')
                 .replace(/(\d)(π|e)/g, '$1*$2')
                 .replace(/(π|e)(\d)/g, '$1*$2')
-                .replace(/(\d)(sin|cos|tan|log|ln|√)/g, '$1*$2');
+                .replace(/(\d)(sin|cos|tan|TR_|HYP_|log|ln|√)/g, '$1*$2')
+                .replace(/(\))(sin|cos|tan|TR_|HYP_|log|ln|√)/g, '$1*$2')
+                .replace(/Ans(sin|cos|tan|TR_|HYP_|log|ln|√)/g, 'Ans*$1');
 
               // If X is still in exp, substitute with variables.X
               exp = exp.replace(/\bX\b/g, `(${variables.X || 0})`);
 
-              // 11. Standard Math Replacements
+              // 12. Standard Math Replacements
               exp = exp
                 .replace(/×/g, '*')
                 .replace(/÷/g, '/')
@@ -811,25 +850,21 @@
                 .replace(/Ran#/g, '(Math.floor(Math.random()*1000)/1000)')
                 .replace(/RanInt#\(/g, 'RanInt(');
 
-              // 12. Hyperbolic functions
+              // 13. Logarithms (Single-argument: default base 10; Natural log: ln)
               exp = exp
-                .replace(/asinh\(/g, 'Math.asinh(')
-                .replace(/acosh\(/g, 'Math.acosh(')
-                .replace(/atanh\(/g, 'Math.atanh(')
-                .replace(/sinh\(/g, 'Math.sinh(')
-                .replace(/cosh\(/g, 'Math.cosh(')
-                .replace(/tanh\(/g, 'Math.tanh(');
-
-              // 13. Logarithms
-              exp = exp
-                .replace(/log\(/g, 'Math.log10(')
+                .replace(/log(?:_b|_)?\(/g, 'Math.log10(')
                 .replace(/ln\(/g, 'Math.log(');
 
-              // 14. Trigonometry Angle Modes
-              exp = exp.replace(/asin\(/g, 'TR_ASIN(');
-              exp = exp.replace(/acos\(/g, 'TR_ACOS(');
-              exp = exp.replace(/atan\(/g, 'TR_ATAN(');
+              // Expand Hyperbolic functions to JS Math
+              exp = exp
+                .replace(/HYP_ASINH\(/g, 'Math.asinh(')
+                .replace(/HYP_ACOSH\(/g, 'Math.acosh(')
+                .replace(/HYP_ATANH\(/g, 'Math.atanh(')
+                .replace(/HYP_SINH\(/g, 'Math.sinh(')
+                .replace(/HYP_COSH\(/g, 'Math.cosh(')
+                .replace(/HYP_TANH\(/g, 'Math.tanh(');
 
+              // Expand Trigonometric functions according to Angle Mode
               if (angleMode === 'D') {
                   exp = exp
                     .replace(/sin\(/g, 'Math.sin((Math.PI/180)*')
@@ -1051,9 +1086,9 @@
                       case '1': insert('sinh('); break;
                       case '2': insert('cosh('); break;
                       case '3': insert('tanh('); break;
-                      case '4': insert('asinh('); break;
-                      case '5': insert('acosh('); break;
-                      case '6': insert('atanh('); break;
+                      case '4': insert('sinh⁻¹('); break;
+                      case '5': insert('cosh⁻¹('); break;
+                      case '6': insert('tanh⁻¹('); break;
                       default: break;
                   }
                   setActiveMenu(null);
@@ -1368,7 +1403,7 @@
                                 color="bg-[#1a4023]" 
                                 onClick={() => {
                                     if (isShift) insert('Σ(');
-                                    else insert('log_b(');
+                                    else insert('log(');
                                 }}
                             />
                         </div>
@@ -1461,7 +1496,7 @@
                             subAlpha="D" 
                             onClick={() => {
                                 if (isAlpha || stoActive || rclActive) handleVariableKey('D');
-                                else if (isShift) insert('asin(');
+                                else if (isShift) insert('sin⁻¹(');
                                 else insert('sin(');
                             }}
                         />
@@ -1471,7 +1506,7 @@
                             subAlpha="E" 
                             onClick={() => {
                                 if (isAlpha || stoActive || rclActive) handleVariableKey('E');
-                                else if (isShift) insert('acos(');
+                                else if (isShift) insert('cos⁻¹(');
                                 else insert('cos(');
                             }}
                         />
@@ -1481,7 +1516,7 @@
                             subAlpha="F" 
                             onClick={() => {
                                 if (isAlpha || stoActive || rclActive) handleVariableKey('F');
-                                else if (isShift) insert('atan(');
+                                else if (isShift) insert('tan⁻¹(');
                                 else insert('tan(');
                             }}
                         />
