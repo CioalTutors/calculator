@@ -199,7 +199,7 @@
 
         // Helper: Fraction / Radical / Pi / Mixed Fraction Converter for S<=>D
         const convertToSD = (currentResult, isMixed = false) => {
-            if (!currentResult || currentResult === 'Error') return currentResult;
+            if (!currentResult || currentResult === 'Error' || currentResult === 'Math ERROR') return currentResult;
 
             // 1. If currently a fraction, mixed fraction, radical or DMS, revert to decimal
             if (typeof currentResult === 'string' && (currentResult.includes('/') || currentResult.includes('√') || currentResult.includes('π') || currentResult.includes('°'))) {
@@ -289,7 +289,7 @@
         // Render Result cleanly: Stacks fractions with horizontal bar (no slash!)
         const renderResultDisplay = (res) => {
             if (!res) return <span>0</span>;
-            if (res === 'Error') return <span className="text-red-700">Error</span>;
+            if (res === 'Error' || res === 'Math ERROR') return <span className="text-red-700 font-bold">Math ERROR</span>;
 
             // 1. Mixed Fraction e.g. "1 2/3" or "-2 3/5"
             if (typeof res === 'string' && res.includes(' ') && res.includes('/')) {
@@ -831,7 +831,7 @@
                   });
                   return;
               }
-              if (!result || result === 'Error') return;
+              if (!result || result === 'Error' || result === 'Math ERROR') return;
               const newRes = convertToSD(result, isMixed);
               setResult(newRes);
               setAnsDisplay(newRes);
@@ -890,7 +890,7 @@
           // Degrees / Minutes / Seconds Conversion (DMS Key)
           const handleDMS = () => {
               if (isOff) return;
-              if (result && result !== 'Error') {
+              if (result && result !== 'Error' && result !== 'Math ERROR') {
                   if (result.includes('°')) {
                       // Already DMS: toggle to decimal degrees
                       const dec = convertToSD(result);
@@ -909,7 +909,7 @@
 
           // Engineering Notation (ENG)
           const handleENG = (isReverse = false) => {
-              if (isOff || !result || result === 'Error') return;
+              if (isOff || !result || result === 'Error' || result === 'Math ERROR') return;
               const num = parseFloat(result);
               if (isNaN(num) || num === 0) return;
 
@@ -1123,6 +1123,89 @@
                 function RanInt(a, b) {
                   return Math.floor(Math.random() * (b - a + 1)) + a;
                 }
+                function trigSin(x) {
+                  if ('${angleMode}' === 'D') {
+                    const norm = ((x % 360) + 360) % 360;
+                    if (norm === 0 || norm === 180) return 0;
+                    if (norm === 90) return 1;
+                    if (norm === 270) return -1;
+                    if (norm === 30 || norm === 150) return 0.5;
+                    if (norm === 210 || norm === 330) return -0.5;
+                    return Math.sin(norm * (Math.PI / 180));
+                  } else if ('${angleMode}' === 'G') {
+                    const norm = ((x % 400) + 400) % 400;
+                    if (norm === 0 || norm === 200) return 0;
+                    if (norm === 100) return 1;
+                    if (norm === 300) return -1;
+                    return Math.sin(norm * (Math.PI / 200));
+                  } else {
+                    const kPi = x / Math.PI;
+                    if (Math.abs(kPi - Math.round(kPi)) < 1e-12) return 0;
+                    return Math.sin(x);
+                  }
+                }
+                function trigCos(x) {
+                  if ('${angleMode}' === 'D') {
+                    const norm = ((x % 360) + 360) % 360;
+                    if (norm === 90 || norm === 270) return 0;
+                    if (norm === 0) return 1;
+                    if (norm === 180) return -1;
+                    if (norm === 60 || norm === 300) return 0.5;
+                    if (norm === 120 || norm === 240) return -0.5;
+                    return Math.cos(norm * (Math.PI / 180));
+                  } else if ('${angleMode}' === 'G') {
+                    const norm = ((x % 400) + 400) % 400;
+                    if (norm === 100 || norm === 300) return 0;
+                    if (norm === 0) return 1;
+                    if (norm === 200) return -1;
+                    return Math.cos(norm * (Math.PI / 200));
+                  } else {
+                    const k = x / Math.PI - 0.5;
+                    if (Math.abs(k - Math.round(k)) < 1e-12) return 0;
+                    return Math.cos(x);
+                  }
+                }
+                function trigTan(x) {
+                  if ('${angleMode}' === 'D') {
+                    const norm = ((x % 180) + 180) % 180;
+                    if (Math.abs(norm - 90) < 1e-12) return NaN;
+                    if (norm === 0) return 0;
+                    if (norm === 45) return 1;
+                    if (norm === 135) return -1;
+                    return Math.tan(x * (Math.PI / 180));
+                  } else if ('${angleMode}' === 'G') {
+                    const norm = ((x % 200) + 200) % 200;
+                    if (Math.abs(norm - 100) < 1e-12) return NaN;
+                    if (norm === 0) return 0;
+                    return Math.tan(x * (Math.PI / 200));
+                  } else {
+                    const k = x / Math.PI - 0.5;
+                    if (Math.abs(k - Math.round(k)) < 1e-12) return NaN;
+                    const kPi = x / Math.PI;
+                    if (Math.abs(kPi - Math.round(kPi)) < 1e-12) return 0;
+                    return Math.tan(x);
+                  }
+                }
+                function trigAsin(x) {
+                  if (x < -1 || x > 1) return NaN;
+                  const res = Math.asin(x);
+                  if ('${angleMode}' === 'D') return res * (180 / Math.PI);
+                  if ('${angleMode}' === 'G') return res * (200 / Math.PI);
+                  return res;
+                }
+                function trigAcos(x) {
+                  if (x < -1 || x > 1) return NaN;
+                  const res = Math.acos(x);
+                  if ('${angleMode}' === 'D') return res * (180 / Math.PI);
+                  if ('${angleMode}' === 'G') return res * (200 / Math.PI);
+                  return res;
+                }
+                function trigAtan(x) {
+                  const res = Math.atan(x);
+                  if ('${angleMode}' === 'D') return res * (180 / Math.PI);
+                  if ('${angleMode}' === 'G') return res * (200 / Math.PI);
+                  return res;
+                }
               `;
 
               // Replace Factorials (e.g. 5!)
@@ -1191,31 +1274,13 @@
                 .replace(/HYP_TANH\(/g, 'Math.tanh(');
 
               // Expand Trigonometric functions according to Angle Mode
-              if (angleMode === 'D') {
-                  exp = exp
-                    .replace(/sin\(/g, 'Math.sin((Math.PI/180)*')
-                    .replace(/cos\(/g, 'Math.cos((Math.PI/180)*')
-                    .replace(/tan\(/g, 'Math.tan((Math.PI/180)*')
-                    .replace(/TR_ASIN\(/g, '(180/Math.PI)*Math.asin(')
-                    .replace(/TR_ACOS\(/g, '(180/Math.PI)*Math.acos(')
-                    .replace(/TR_ATAN\(/g, '(180/Math.PI)*Math.atan(');
-              } else if (angleMode === 'G') {
-                  exp = exp
-                    .replace(/sin\(/g, 'Math.sin((Math.PI/200)*')
-                    .replace(/cos\(/g, 'Math.cos((Math.PI/200)*')
-                    .replace(/tan\(/g, 'Math.tan((Math.PI/200)*')
-                    .replace(/TR_ASIN\(/g, '(200/Math.PI)*Math.asin(')
-                    .replace(/TR_ACOS\(/g, '(200/Math.PI)*Math.acos(')
-                    .replace(/TR_ATAN\(/g, '(200/Math.PI)*Math.atan(');
-              } else {
-                  exp = exp
-                    .replace(/sin\(/g, 'Math.sin(')
-                    .replace(/cos\(/g, 'Math.cos(')
-                    .replace(/tan\(/g, 'Math.tan(')
-                    .replace(/TR_ASIN\(/g, 'Math.asin(')
-                    .replace(/TR_ACOS\(/g, 'Math.acos(')
-                    .replace(/TR_ATAN\(/g, 'Math.atan(');
-              }
+              exp = exp
+                .replace(/sin\(/g, 'trigSin(')
+                .replace(/cos\(/g, 'trigCos(')
+                .replace(/tan\(/g, 'trigTan(')
+                .replace(/TR_ASIN\(/g, 'trigAsin(')
+                .replace(/TR_ACOS\(/g, 'trigAcos(')
+                .replace(/TR_ATAN\(/g, 'trigAtan(');
 
               // Final check for balanced parentheses
               exp = autoCloseBrackets(exp);
@@ -1228,7 +1293,7 @@
               if (!formatResult) return res;
 
               if (typeof res === 'string') return res;
-              if (isNaN(res) || !isFinite(res)) return 'Error';
+              if (isNaN(res) || !isFinite(res)) return 'Math ERROR';
 
               // BY DEFAULT: DISPLAY AS DECIMAL (NOT FRACTION)
               // User can press S<=>D anytime to convert to stacked fraction!
@@ -1274,12 +1339,12 @@
                           lastRes = evaluateMath(stmt, true);
                       }
                   }
-                  if (hasDMS && lastRes !== 'Error' && !isNaN(parseFloat(lastRes))) {
+                  if (hasDMS && lastRes !== 'Error' && lastRes !== 'Math ERROR' && !isNaN(parseFloat(lastRes))) {
                       lastRes = toDMS(lastRes);
                   }
                   setResult(lastRes);
                   setIsResultMode(true);
-                  if (lastRes !== 'Error') {
+                  if (lastRes !== 'Error' && lastRes !== 'Math ERROR') {
                       if (typeof lastRaw === 'number' && !isNaN(lastRaw) && isFinite(lastRaw)) {
                           setAnsValue(lastRaw);
                       }
@@ -1293,12 +1358,12 @@
               try {
                   const rawVal = evaluateMath(cleanExp, false);
                   let finalRes = evaluateMath(cleanExp, true);
-                  if (hasDMS && finalRes !== 'Error' && !isNaN(parseFloat(finalRes))) {
+                  if (hasDMS && finalRes !== 'Error' && finalRes !== 'Math ERROR' && !isNaN(parseFloat(finalRes))) {
                       finalRes = toDMS(finalRes);
                   }
                   setResult(finalRes);
                   setIsResultMode(true);
-                  if (finalRes !== 'Error') {
+                  if (finalRes !== 'Error' && finalRes !== 'Math ERROR') {
                       if (typeof rawVal === 'number' && !isNaN(rawVal) && isFinite(rawVal)) {
                           setAnsValue(rawVal);
                       }
@@ -1307,7 +1372,7 @@
                       setHistoryIdx(-1);
                   }
               } catch (e) {
-                  setResult('Error');
+                  setResult('Math ERROR');
                   setIsResultMode(true);
               }
               setIsShift(false);
